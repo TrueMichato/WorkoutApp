@@ -5,7 +5,6 @@ import com.example.workoutapp.data.local.dao.UserGoalDao
 import com.example.workoutapp.data.model.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -14,8 +13,6 @@ class UserGoalRepository @Inject constructor(
     private val userGoalDao: UserGoalDao,
     private val userPreferencesDataStore: UserPreferencesDataStore
 ) {
-    private val json = Json { encodeDefaults = true }
-
     suspend fun getUserGoal(): UserGoal = userGoalDao.get() ?: UserGoal()
 
     fun getUserGoalFlow(): Flow<UserGoal?> = userGoalDao.getFlow()
@@ -36,21 +33,17 @@ class UserGoalRepository @Inject constructor(
 
     suspend fun setCategoryWeights(weights: Map<WorkoutCategory, Float>) {
         val weightsMap = weights.mapKeys { it.key.name }
-        val weightsJson = json.encodeToString(weightsMap)
+        val weightsJson = persistedJson.encodeToString(weightsMap)
         userGoalDao.updateCategoryWeights(weightsJson)
         userPreferencesDataStore.markProfileCustomized()
     }
 
     suspend fun getCategoryWeights(): Map<WorkoutCategory, Float> {
-        val goal = getUserGoal()
-        return try {
-            val map = json.decodeFromString<Map<String, Float>>(goal.categoryWeights)
-            map.mapKeys { WorkoutCategory.valueOf(it.key) }
-        } catch (e: Exception) {
-            // Return default weights from current phase
-            goal.currentPhase.defaultWeights
-        }
+        return getCategoryWeightsResult().value
     }
+
+    suspend fun getCategoryWeightsResult(): PersistedJsonResult<Map<WorkoutCategory, Float>> =
+        decodeCategoryWeights(getUserGoal().categoryWeights)
 
     // Category stats
     fun getAllCategoryStats(): Flow<List<CategoryStats>> = userGoalDao.getAllCategoryStats()

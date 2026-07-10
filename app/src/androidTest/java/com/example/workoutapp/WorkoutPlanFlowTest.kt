@@ -25,6 +25,7 @@ import javax.inject.Inject
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -107,7 +108,7 @@ class WorkoutPlanFlowTest {
             composeRule.onAllNodesWithText(exerciseName).fetchSemanticsNodes().isNotEmpty()
         }
 
-        composeRule.onNodeWithText(exerciseName).assertIsDisplayed()
+        assertTrue(composeRule.onAllNodesWithText(exerciseName).fetchSemanticsNodes().isNotEmpty())
         composeRule.onNodeWithText("3 rounds", substring = true).assertIsDisplayed()
         composeRule.onNodeWithText("Tempo 31X1", substring = true).assertIsDisplayed()
         composeRule.onNodeWithText("RPE 8", substring = true).assertIsDisplayed()

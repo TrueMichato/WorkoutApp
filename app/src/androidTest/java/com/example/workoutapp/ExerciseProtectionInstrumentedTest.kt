@@ -2,7 +2,9 @@ package com.example.workoutapp
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.workoutapp.data.local.WorkoutDatabase
+import androidx.test.platform.app.InstrumentationRegistry
 import com.example.workoutapp.data.csv.ExerciseCsvImporter
+import com.example.workoutapp.data.local.MediaStorageManager
 import com.example.workoutapp.data.model.Difficulty
 import com.example.workoutapp.data.model.Exercise
 import com.example.workoutapp.data.model.MuscleGroup
@@ -91,7 +93,8 @@ class ExerciseProtectionInstrumentedTest {
             primaryMuscles = listOf(MuscleGroup.CHEST)
         )
 
-        val viewModel = AddEditExerciseViewModel(exerciseRepository, equipmentRepository)
+        val mediaStorageManager = MediaStorageManager(InstrumentationRegistry.getInstrumentation().targetContext)
+        val viewModel = AddEditExerciseViewModel(exerciseRepository, equipmentRepository, mediaStorageManager)
         viewModel.loadExercise(exerciseId)
         waitUntil { !viewModel.uiState.value.isLoading && viewModel.uiState.value.name == "Original metadata row" }
 

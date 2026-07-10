@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -26,6 +28,9 @@ import org.junit.rules.TemporaryFolder
  */
 private class FakeUserGoalDao(seed: UserGoal?) : UserGoalDao {
     val goalFlow = MutableStateFlow(seed)
+
+    /** Convenience accessor for tests that assert on the raw stored row without going through a Flow. */
+    val goal: UserGoal? get() = goalFlow.value
 
     override suspend fun insert(goal: UserGoal) { goalFlow.value = goal }
     override suspend fun update(goal: UserGoal) { goalFlow.value = goal }
@@ -57,11 +62,13 @@ private class FakeUserGoalDao(seed: UserGoal?) : UserGoalDao {
 }
 
 /**
- * Integration-level coverage for the exact review finding: a seeded default [UserGoal] row (the
- * same neutral row [com.example.workoutapp.data.local.WorkoutDatabase] inserts for every fresh
- * install) must NOT be read as the user having customized their profile. Only the real Settings
- * save flow ([UserGoalRepository.setTrainingPhase] / [UserGoalRepository.setCategoryWeights])
- * may flip that signal.
+ * Integration-level coverage for [UserGoalRepository]: both the "customized profile" signal
+ * (a seeded default [UserGoal] row - the same neutral row [com.example.workoutapp.data.local.WorkoutDatabase]
+ * inserts for every fresh install - must NOT be read as the user having customized their profile;
+ * only the real Settings save flow via [UserGoalRepository.setTrainingPhase] /
+ * [UserGoalRepository.setCategoryWeights] may flip that signal) and resilient category-weights
+ * JSON decoding (unknown/malformed persisted data must be reported as an issue rather than silently
+ * dropped or crashing, without overwriting the raw stored value).
  */
 class UserGoalRepositoryTest {
 
@@ -124,5 +131,32 @@ class UserGoalRepositoryTest {
             "setCategoryWeights is a real user save action and must mark the profile customized",
             repository.hasCustomizedProfileFlow().first()
         )
+    }
+
+    @Test
+    fun categoryWeights_unknownForwardCategoryPreservesKnownWeightsAndReportsIssue() = runTest {
+        val (repository, _) = newRepository(
+            seed = UserGoal(categoryWeights = """{"STRENGTH":2.0,"FUTURE_CATEGORY":1.5}""")
+        )
+
+        val result = repository.getCategoryWeightsResult()
+
+        assertEquals(mapOf(WorkoutCategory.STRENGTH to 2.0f), result.value)
+        assertTrue(result.hasIssues)
+        assertTrue(result.issues.single().message.contains("unknown category"))
+        assertEquals(mapOf(WorkoutCategory.STRENGTH to 2.0f), repository.getCategoryWeights())
+    }
+
+    @Test
+    fun categoryWeights_malformedJsonReportsIssueWithoutOverwritingStoredRawValue() = runTest {
+        val raw = """{"STRENGTH":"""
+        val (repository, dao) = newRepository(seed = UserGoal(categoryWeights = raw))
+
+        val result = repository.getCategoryWeightsResult()
+
+        assertTrue(result.value.isEmpty())
+        assertTrue(result.hasIssues)
+        assertEquals(raw, dao.goal?.categoryWeights)
+        assertTrue(repository.getCategoryWeights().isEmpty())
     }
 }

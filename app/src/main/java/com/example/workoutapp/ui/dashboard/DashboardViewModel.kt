@@ -81,7 +81,8 @@ class DashboardViewModel @Inject constructor(
             userGoalRepository.recalculateDaysSinceLastTrained()
             userGoalRepository.getAllCategoryStats().collect { stats ->
                 val statsMap = stats.associate { it.category to it.daysSinceLastTrained }
-                val weights = try { userGoalRepository.getCategoryWeights() } catch (_: Exception) { emptyMap() }
+                val weightsResult = userGoalRepository.getCategoryWeightsResult()
+                val weights = weightsResult.value
                 val balanceStatus = DashboardAnalytics.balanceStatus(stats, weights)
                 val balances = DashboardAnalytics.categoryBalances(stats, weights)
                 _uiState.update {
@@ -90,7 +91,8 @@ class DashboardViewModel @Inject constructor(
                         categoryStatsList = stats,
                         balanceStatus = balanceStatus,
                         balanceScore = (balanceStatus as? DashboardAnalytics.BalanceStatus.Ready)?.score,
-                        categoryBalances = balances
+                        categoryBalances = balances,
+                        error = weightsResult.issues.toUserMessage().ifBlank { null }
                     ).withRecommendation()
                 }
             }

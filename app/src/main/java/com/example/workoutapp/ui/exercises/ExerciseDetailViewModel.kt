@@ -1,32 +1,34 @@
 package com.example.workoutapp.ui.exercises
 
 import android.net.Uri
-import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.workoutapp.data.local.MediaStorageException
+import com.example.workoutapp.data.local.MediaStorageManager
 import com.example.workoutapp.data.model.Equipment
 import com.example.workoutapp.data.model.Exercise
 import com.example.workoutapp.data.model.ExerciseProgrammingPreset
 import com.example.workoutapp.data.model.MuscleGroup
+import com.example.workoutapp.data.model.PersistedDataDecodeException
+import com.example.workoutapp.data.model.PersistedJsonIssue
 import com.example.workoutapp.data.model.TrainingPhase
 import com.example.workoutapp.data.model.WorkoutCategory
+import com.example.workoutapp.data.model.decodeTrainingPhasePresets
 import com.example.workoutapp.data.repository.EquipmentRepository
 import com.example.workoutapp.data.repository.ExerciseRepository
 import com.example.workoutapp.data.repository.UserGoalRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
 import javax.inject.Inject
 
 @HiltViewModel
 class ExerciseDetailViewModel @Inject constructor(
     private val exerciseRepository: ExerciseRepository,
     private val equipmentRepository: EquipmentRepository,
-    private val userGoalRepository: UserGoalRepository
+    private val userGoalRepository: UserGoalRepository,
+    private val mediaStorageManager: MediaStorageManager
 ) : ViewModel() {
-
-    private val json = Json { ignoreUnknownKeys = true }
 
     private val _uiState = MutableStateFlow(ExerciseDetailUiState())
     val uiState: StateFlow<ExerciseDetailUiState> = _uiState.asStateFlow()
@@ -60,21 +62,20 @@ class ExerciseDetailViewModel @Inject constructor(
                         equipmentRepository.getEquipmentById(id)
                     }
 
-                    // Parse media
+                    val decodeIssues = mutableListOf<PersistedJsonIssue>()
                     val localUris = try {
-                        json.decodeFromString<List<String>>(exercise.localMediaUris)
-                            .map { it.toUri() }
-                    } catch (_: Exception) {
+                        val result = mediaStorageManager.decodeLocalMediaUris(exercise.localMediaUris)
+                        decodeIssues += result.issues
+                        result.value
+                    } catch (e: PersistedDataDecodeException) {
+                        decodeIssues += PersistedJsonIssue(e.fieldName, e.rawValue, e.message ?: "Saved media could not be decoded.")
                         emptyList()
                     }
 
-                    val externalUrls = try {
-                        json.decodeFromString<List<String>>(exercise.externalMediaUrls)
-                    } catch (_: Exception) {
-                        emptyList()
-                    }
+                    val externalUrlResult = mediaStorageManager.decodeExternalUrls(exercise.externalMediaUrls)
+                    decodeIssues += externalUrlResult.issues
 
-                    val presets = mergePresetsWithDefaults(exercise)
+                    val presets = mergePresetsWithDefaults(exercise, decodeIssues)
 
                     _uiState.update { state ->
                         state.copy(
@@ -84,8 +85,9 @@ class ExerciseDetailViewModel @Inject constructor(
                             primaryMuscles = primaryMuscles,
                             secondaryMuscles = secondaryMuscles,
                             localMediaUris = localUris,
-                            externalUrls = externalUrls,
+                            externalUrls = externalUrlResult.value,
                             programmingPresets = presets,
+                            dataWarnings = decodeIssues.map { it.message },
                             isLoading = false
                         )
                     }
@@ -125,19 +127,17 @@ class ExerciseDetailViewModel @Inject constructor(
         }
     }
 
-    private fun mergePresetsWithDefaults(exercise: Exercise): Map<TrainingPhase, ExerciseProgrammingPreset> {
+    private fun mergePresetsWithDefaults(
+        exercise: Exercise,
+        decodeIssues: MutableList<PersistedJsonIssue>
+    ): Map<TrainingPhase, ExerciseProgrammingPreset> {
         val seeded = TrainingPhase.entries.associateWith { phase ->
             defaultPresetForPhase(phase, exercise)
         }.toMutableMap()
-        val stored = try {
-            json.decodeFromString<Map<String, ExerciseProgrammingPreset>>(exercise.trainingPhasePresets)
-        } catch (_: Exception) {
-            emptyMap()
-        }
-        stored.forEach { (phaseName, preset) ->
-            TrainingPhase.entries.find { it.name == phaseName }?.let { phase ->
-                seeded[phase] = preset
-            }
+        val stored = decodeTrainingPhasePresets("exercise programming presets", exercise.trainingPhasePresets)
+        decodeIssues += stored.issues
+        stored.value.forEach { (phase, preset) ->
+            seeded[phase] = preset
         }
         return seeded
     }
@@ -167,6 +167,7 @@ data class ExerciseDetailUiState(
     val localMediaUris: List<Uri> = emptyList(),
     val externalUrls: List<String> = emptyList(),
     val programmingPresets: Map<TrainingPhase, ExerciseProgrammingPreset> = emptyMap(),
+    val dataWarnings: List<String> = emptyList(),
     val currentPhase: TrainingPhase = TrainingPhase.BALANCED,
     val isLoading: Boolean = true,
     val archiveCompleted: Boolean = false,

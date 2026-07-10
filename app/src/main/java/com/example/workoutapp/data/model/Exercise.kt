@@ -3,8 +3,6 @@ package com.example.workoutapp.data.model
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.json.Json
 
 /**
  * Core Exercise entity representing a single exercise in the library.
@@ -64,18 +62,12 @@ data class ExerciseProgrammingPreset(
     val notes: String = ""
 )
 
-private val exercisePresetJson = Json {
-    ignoreUnknownKeys = true
-    encodeDefaults = true
-}
+fun Exercise.decodeStoredProgrammingPresets(): PersistedJsonResult<Map<TrainingPhase, ExerciseProgrammingPreset>> =
+    decodeTrainingPhasePresets("exercise programming presets", trainingPhasePresets)
 
 fun Exercise.resolveStoredProgrammingPreset(phase: TrainingPhase): ExerciseProgrammingPreset? {
-    val presets = try {
-        exercisePresetJson.decodeFromString<Map<String, ExerciseProgrammingPreset>>(trainingPhasePresets)
-    } catch (_: Exception) {
-        emptyMap()
-    }
-    return presets[phase.name] ?: presets[TrainingPhase.BALANCED.name]
+    val presets = decodeStoredProgrammingPresets()
+    return presets.value[phase] ?: presets.value[TrainingPhase.BALANCED]
 }
 
 fun Exercise.resolveBalancedProgrammingPreset(): ExerciseProgrammingPreset =

@@ -173,6 +173,22 @@ fun WorkoutPlanEditorScreen(
                                 )
                             }
                         }
+
+                        uiState.dataWarning?.let { message ->
+                            item {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    shape = MaterialTheme.shapes.medium,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = message,
+                                        modifier = Modifier.padding(16.dp),
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     item {
