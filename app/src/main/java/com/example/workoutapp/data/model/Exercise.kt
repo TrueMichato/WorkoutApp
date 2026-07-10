@@ -67,13 +67,6 @@ fun Exercise.decodeStoredProgrammingPresets(): PersistedJsonResult<Map<TrainingP
 
 fun Exercise.resolveStoredProgrammingPreset(phase: TrainingPhase): ExerciseProgrammingPreset? {
     val presets = decodeStoredProgrammingPresets()
-    if (presets.hasIssues) {
-        throw PersistedDataDecodeException(
-            fieldName = "exercise programming presets",
-            rawValue = trainingPhasePresets,
-            cause = IllegalArgumentException(presets.issues.toUserMessage())
-        )
-    }
     return presets.value[phase] ?: presets.value[TrainingPhase.BALANCED]
 }
 

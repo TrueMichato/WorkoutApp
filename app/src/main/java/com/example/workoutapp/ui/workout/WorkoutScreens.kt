@@ -448,6 +448,22 @@ fun WorkoutGeneratorScreen(
                     }
                 }
 
+                uiState.warning?.let { warning ->
+                    item {
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = MaterialTheme.shapes.medium,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                warning,
+                                modifier = Modifier.padding(16.dp),
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+                }
+
                 uiState.error?.let { error ->
                     item {
                         Surface(

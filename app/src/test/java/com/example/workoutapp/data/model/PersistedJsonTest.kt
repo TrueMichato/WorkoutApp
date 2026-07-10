@@ -35,6 +35,44 @@ class PersistedJsonTest {
     }
 
     @Test
+    fun exerciseResolver_unknownPhaseKeyUsesKnownBalancedPresetWithoutThrowing() {
+        val exercise = Exercise(
+            name = "Push-up",
+            trainingPhasePresets = """
+                {
+                  "BALANCED":{"setsText":"5","repsText":"10","restSeconds":45},
+                  "FUTURE_PHASE":{"setsText":"1","repsText":"1","restSeconds":1}
+                }
+            """.trimIndent()
+        )
+
+        val preset = exercise.resolveBalancedProgrammingPreset()
+
+        assertEquals("5", preset.setsText)
+        assertEquals("10", preset.repsText)
+        assertEquals(45, preset.restSeconds)
+        assertTrue(exercise.decodeStoredProgrammingPresets().hasIssues)
+    }
+
+    @Test
+    fun exerciseResolver_malformedPresetJsonFallsBackWithoutThrowing() {
+        val exercise = Exercise(
+            name = "Push-up",
+            defaultSets = 4,
+            defaultReps = "6-8",
+            defaultRestSeconds = 120,
+            trainingPhasePresets = """{"BALANCED":"""
+        )
+
+        val preset = exercise.resolveBalancedProgrammingPreset()
+
+        assertEquals("4", preset.setsText)
+        assertEquals("6-8", preset.repsText)
+        assertEquals(120, preset.restSeconds)
+        assertTrue(exercise.decodeStoredProgrammingPresets().hasIssues)
+    }
+
+    @Test
     fun richPrescription_malformedJsonReportsIssueWithoutInventingDefaults() {
         val result = """{"rounds":""".decodeRichPrescriptionData()
 

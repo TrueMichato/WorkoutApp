@@ -13,8 +13,14 @@ class PersistedDataDecodeException(
 data class PersistedJsonIssue(
     val fieldName: String,
     val rawValue: String,
-    val message: String
+    val message: String,
+    val kind: PersistedJsonIssueKind = PersistedJsonIssueKind.UNKNOWN_VALUE
 )
+
+enum class PersistedJsonIssueKind {
+    MALFORMED_JSON,
+    UNKNOWN_VALUE
+}
 
 data class PersistedJsonResult<T>(
     val value: T,
@@ -45,17 +51,27 @@ inline fun <reified T> decodePersistedJsonCompatible(
     try {
         PersistedJsonResult(persistedJson.decodeFromString(rawValue))
     } catch (e: SerializationException) {
+        malformedPersistedJsonResult(fieldName, rawValue, fallback)
+    } catch (e: IllegalArgumentException) {
+        malformedPersistedJsonResult(fieldName, rawValue, fallback)
+    }
+
+fun <T> malformedPersistedJsonResult(
+    fieldName: String,
+    rawValue: String,
+    fallback: T
+): PersistedJsonResult<T> =
         PersistedJsonResult(
             value = fallback,
             issues = listOf(
                 PersistedJsonIssue(
                     fieldName = fieldName,
                     rawValue = rawValue,
-                    message = "Saved $fieldName is malformed and could not be decoded. The raw value will be kept until you replace it."
+                    message = "Saved $fieldName is malformed and could not be decoded. The raw value will be kept until you replace it.",
+                    kind = PersistedJsonIssueKind.MALFORMED_JSON
                 )
             )
         )
-    }
 
 fun decodePersistedStringList(fieldName: String, rawValue: String): PersistedJsonResult<List<String>> =
     decodePersistedJsonCompatible(fieldName, rawValue, emptyList())
@@ -134,3 +150,6 @@ fun decodeCategoryWeights(rawValue: String): PersistedJsonResult<Map<WorkoutCate
 
 fun List<PersistedJsonIssue>.toUserMessage(): String =
     joinToString(separator = "\n") { it.message }
+
+fun List<PersistedJsonIssue>.hasMalformedJson(): Boolean =
+    any { it.kind == PersistedJsonIssueKind.MALFORMED_JSON }

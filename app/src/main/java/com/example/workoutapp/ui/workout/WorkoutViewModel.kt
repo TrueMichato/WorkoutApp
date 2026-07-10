@@ -12,6 +12,7 @@ import com.example.workoutapp.data.model.TrainingPhase
 import com.example.workoutapp.data.model.UserGoal
 import com.example.workoutapp.data.model.WeightUnit
 import com.example.workoutapp.data.model.PlanExerciseSection
+import com.example.workoutapp.data.model.PersistedJsonIssue
 import com.example.workoutapp.data.model.RichPrescriptionData
 import com.example.workoutapp.data.model.WorkoutCategory
 import com.example.workoutapp.data.model.WorkoutPlanTemplate
@@ -19,8 +20,10 @@ import com.example.workoutapp.data.model.WorkoutPlanTemplateExercise
 import com.example.workoutapp.data.model.WorkoutPlanTemplateSummary
 import com.example.workoutapp.data.model.WorkoutSession
 import com.example.workoutapp.data.model.decodePersistedEnumNameList
+import com.example.workoutapp.data.model.decodeStoredProgrammingPresets
 import com.example.workoutapp.data.model.persistedJson
 import com.example.workoutapp.data.model.resolveBalancedProgrammingPreset
+import com.example.workoutapp.data.model.toUserMessage
 import com.example.workoutapp.data.model.toJson
 import com.example.workoutapp.data.model.toRichPrescriptionDataOrNull
 import com.example.workoutapp.data.repository.ExerciseRepository
@@ -73,6 +76,7 @@ class WorkoutViewModel @Inject constructor(
     private val _isGenerating = MutableStateFlow(false)
     private val _isPreviewing = MutableStateFlow(false)
     private val _generationError = MutableStateFlow<String?>(null)
+    private val _generationWarning = MutableStateFlow<String?>(null)
     private val _generatedSessionId = MutableStateFlow<Long?>(null)
     private val _previewDraft = MutableStateFlow<WorkoutPlanDraft?>(null)
     private val _isSavingPlan = MutableStateFlow(false)
@@ -148,16 +152,18 @@ class WorkoutViewModel @Inject constructor(
     ) { base, cats, slot -> GeneratorSelectionState(base, cats.toList(), slot) }
 
     private val generatorStatusState = combine(
-        _isGenerating, _isPreviewing, _generationError, _generatedSessionId, _previewDraft, _isSavingPlan, _planSaveMessage
+        _isGenerating, _isPreviewing, _generationError, _generationWarning,
+        _generatedSessionId, _previewDraft, _isSavingPlan, _planSaveMessage
     ) { args: Array<Any?> ->
         GeneratorStatusState(
             isGenerating = args[0] as Boolean,
             isPreviewing = args[1] as Boolean,
             error = args[2] as String?,
-            generatedSessionId = args[3] as Long?,
-            previewDraft = args[4] as WorkoutPlanDraft?,
-            isSavingPlan = args[5] as Boolean,
-            planSaveMessage = args[6] as String?
+            warning = args[3] as String?,
+            generatedSessionId = args[4] as Long?,
+            previewDraft = args[5] as WorkoutPlanDraft?,
+            isSavingPlan = args[6] as Boolean,
+            planSaveMessage = args[7] as String?
         )
     }
 
@@ -173,7 +179,7 @@ class WorkoutViewModel @Inject constructor(
             currentPhase = sel.base.currentPhase,
             excludedExerciseIds = sel.base.excludedPreviewExerciseIds,
             isGenerating = st.isGenerating, isPreviewing = st.isPreviewing,
-            error = st.error, generatedSessionId = st.generatedSessionId, previewDraft = st.previewDraft,
+            error = st.error, warning = st.warning, generatedSessionId = st.generatedSessionId, previewDraft = st.previewDraft,
             hasPreviewCustomizations = sel.base.excludedPreviewExerciseIds.isNotEmpty(),
             isSavingPlan = st.isSavingPlan,
             planSaveMessage = st.planSaveMessage
@@ -471,7 +477,7 @@ class WorkoutViewModel @Inject constructor(
             if (_previewFeedbackSessionId.value == null) {
                 _previewFeedbackSessionId.value = -System.currentTimeMillis()
             }
-            _isPreviewing.value = true; _generationError.value = null
+            _isPreviewing.value = true; _generationError.value = null; _generationWarning.value = null
             try { _previewDraft.value = workoutPlanner.previewWorkout(currentGenerationParams()) }
             catch (e: Exception) { _previewDraft.value = null; _generationError.value = e.message ?: "Preview failed." }
             finally { _isPreviewing.value = false }
@@ -507,7 +513,7 @@ class WorkoutViewModel @Inject constructor(
 
     fun generateWorkout() {
         viewModelScope.launch {
-            _isGenerating.value = true; _generationError.value = null
+            _isGenerating.value = true; _generationError.value = null; _generationWarning.value = null
             try {
                 val result = workoutPlanner.generateAndSaveWorkout(currentGenerationParams())
                 _previewDraft.value = result.draft; _generatedSessionId.value = result.sessionId
@@ -679,7 +685,11 @@ class WorkoutViewModel @Inject constructor(
             ?.let { ((System.currentTimeMillis() - it) / (24L * 60L * 60L * 1000L)).toInt() }
             ?: Int.MAX_VALUE
         val daysSinceCategory = userGoalRepository.getCategoryStats(category)?.daysSinceLastTrained ?: Int.MAX_VALUE
-        val weights = userGoalRepository.getCategoryWeights()
+        val weightsResult = userGoalRepository.getCategoryWeightsResult()
+        val weights = weightsResult.value
+        if (weightsResult.hasIssues) {
+            _generationWarning.value = weightsResult.issues.toUserMessage()
+        }
         
         val statsList = userGoalRepository.getAllCategoryStats().first()
         val balanceScore = DashboardAnalytics.balanceScore(statsList, weights)
@@ -716,6 +726,7 @@ class WorkoutViewModel @Inject constructor(
     private fun invalidateGeneratorPreview() {
         _previewDraft.value = null
         _generationError.value = null
+        _generationWarning.value = null
         _excludedPreviewExerciseIds.value = emptySet()
         _previewFeedbackSessionId.value = null
     }
@@ -742,12 +753,18 @@ class WorkoutViewModel @Inject constructor(
         viewModelScope.launch {
             exerciseRepository.getAllExercises().collect { exercises ->
                 val sorted = exercises.sortedBy { it.name.lowercase() }
+                val presetIssues = sorted.flatMap { exercise ->
+                    exercise.decodeStoredProgrammingPresets().issues.map { issue ->
+                        issue.copy(message = "${exercise.name}: ${issue.message}")
+                    }
+                }
                 _planEditorUiState.update { state ->
                     state.copy(
                         availableExercises = sorted,
                         selectedExercises = state.selectedExercises.map { item ->
                             item.copy(exerciseName = sorted.firstOrNull { it.id == item.exerciseId }?.name ?: item.exerciseName)
-                        }
+                        },
+                        dataWarning = presetIssues.toUserMessage().ifBlank { null }
                     )
                 }
             }
@@ -873,6 +890,7 @@ private data class GeneratorStatusState(
     val isGenerating: Boolean = false,
     val isPreviewing: Boolean = false,
     val error: String? = null,
+    val warning: String? = null,
     val generatedSessionId: Long? = null,
     val previewDraft: WorkoutPlanDraft? = null,
     val isSavingPlan: Boolean = false,
@@ -895,7 +913,7 @@ data class WorkoutGeneratorUiState(
     val selectedCategories: List<WorkoutCategory> = emptyList(), val selectedTimeSlot: TimeSlot = TimeSlot.ANYTIME,
     val currentPhase: TrainingPhase = TrainingPhase.BALANCED, val excludedExerciseIds: Set<Long> = emptySet(),
     val isGenerating: Boolean = false, val isPreviewing: Boolean = false,
-    val error: String? = null, val generatedSessionId: Long? = null, val previewDraft: WorkoutPlanDraft? = null,
+    val error: String? = null, val warning: String? = null, val generatedSessionId: Long? = null, val previewDraft: WorkoutPlanDraft? = null,
     val hasPreviewCustomizations: Boolean = false,
     val isSavingPlan: Boolean = false,
     val planSaveMessage: String? = null,
@@ -954,7 +972,8 @@ data class WorkoutPlanEditorUiState(
     val saveSuccess: Boolean = false,
     val isDeleted: Boolean = false,
     val startedSessionId: Long? = null,
-    val error: String? = null
+    val error: String? = null,
+    val dataWarning: String? = null
 )
 
 private fun Exercise.toEditorItem(): PlanExerciseEditorItem =

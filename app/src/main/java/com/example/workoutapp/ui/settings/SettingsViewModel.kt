@@ -9,6 +9,7 @@ import com.example.workoutapp.data.model.PersistedDataDecodeException
 import com.example.workoutapp.data.model.TrainingPhase
 import com.example.workoutapp.data.model.UserGoal
 import com.example.workoutapp.data.model.WorkoutCategory
+import com.example.workoutapp.data.model.toUserMessage
 import com.example.workoutapp.data.repository.ExerciseRepository
 import com.example.workoutapp.data.repository.UserGoalRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -42,17 +43,14 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             userGoalRepository.getUserGoalFlow().collect { goal ->
                 val g = goal ?: UserGoal()
-                val weights = try {
-                    userGoalRepository.getCategoryWeights()
-                } catch (e: PersistedDataDecodeException) {
-                    _goalState.update { it.copy(error = e.message ?: "Saved training-goal weights could not be decoded.") }
-                    g.currentPhase.defaultWeights
-                }
+                val weightsResult = userGoalRepository.getCategoryWeightsResult()
+                val weights = weightsResult.value.ifEmpty { g.currentPhase.defaultWeights }
                 _goalState.update {
                     it.copy(
                         currentPhase = g.currentPhase,
                         categoryWeights = weights,
-                        isLoading = false
+                        isLoading = false,
+                        error = weightsResult.issues.toUserMessage().ifBlank { null }
                     )
                 }
             }

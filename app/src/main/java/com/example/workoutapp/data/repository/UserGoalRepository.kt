@@ -28,17 +28,11 @@ class UserGoalRepository @Inject constructor(
     }
 
     suspend fun getCategoryWeights(): Map<WorkoutCategory, Float> {
-        val goal = getUserGoal()
-        val result = decodeCategoryWeights(goal.categoryWeights)
-        if (result.hasIssues) {
-            throw PersistedDataDecodeException(
-                fieldName = "category weights",
-                rawValue = goal.categoryWeights,
-                cause = IllegalArgumentException(result.issues.toUserMessage())
-            )
-        }
-        return result.value
+        return getCategoryWeightsResult().value
     }
+
+    suspend fun getCategoryWeightsResult(): PersistedJsonResult<Map<WorkoutCategory, Float>> =
+        decodeCategoryWeights(getUserGoal().categoryWeights)
 
     // Category stats
     fun getAllCategoryStats(): Flow<List<CategoryStats>> = userGoalDao.getAllCategoryStats()

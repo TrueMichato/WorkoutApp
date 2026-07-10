@@ -19,45 +19,49 @@ import org.junit.runner.RunWith
 class MediaStorageManagerTest {
 
     @Test
-    fun copyIntoExerciseMedia_createsOwnedRestorableFileUri() = runBlocking {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val manager = MediaStorageManager(context)
-        val source = File(context.cacheDir, "selected-media.txt").apply {
-            writeText("demo media")
+    fun copyIntoExerciseMedia_createsOwnedRestorableFileUri() {
+        runBlocking {
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            val manager = MediaStorageManager(context)
+            val source = File(context.cacheDir, "selected-media.txt").apply {
+                writeText("demo media")
+            }
+
+            val copied = manager.copyIntoExerciseMedia(listOf(source.toUri())).single()
+            val copiedFile = File(requireNotNull(copied.path))
+
+            assertTrue(manager.isOwnedExerciseMedia(copied))
+            assertTrue(copiedFile.isFile)
+            assertEquals("demo media", copiedFile.readText())
+
+            manager.deleteOwnedMediaFiles(listOf(copied))
+            source.delete()
         }
-
-        val copied = manager.copyIntoExerciseMedia(listOf(source.toUri())).single()
-        val copiedFile = File(requireNotNull(copied.path))
-
-        assertTrue(manager.isOwnedExerciseMedia(copied))
-        assertTrue(copiedFile.isFile)
-        assertEquals("demo media", copiedFile.readText())
-
-        manager.deleteOwnedMediaFiles(listOf(copied))
-        source.delete()
     }
 
     @Test
-    fun deleteUnreferencedMedia_keepsFilesStillReferencedByAnotherExercise() = runBlocking {
-        val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val manager = MediaStorageManager(context)
-        val source = File(context.cacheDir, "shared-media.txt").apply {
-            writeText("shared media")
+    fun deleteUnreferencedMedia_keepsFilesStillReferencedByAnotherExercise() {
+        runBlocking {
+            val context = InstrumentationRegistry.getInstrumentation().targetContext
+            val manager = MediaStorageManager(context)
+            val source = File(context.cacheDir, "shared-media.txt").apply {
+                writeText("shared media")
+            }
+            val copied = manager.copyIntoExerciseMedia(listOf(source.toUri())).single()
+            val referencedExercise = Exercise(
+                id = 2,
+                name = "Referenced",
+                localMediaUris = persistedJson.encodeToString(listOf(copied.toString()))
+            )
+
+            val deleted = manager.deleteUnreferencedMedia(listOf(copied), listOf(referencedExercise))
+
+            assertEquals(0, deleted)
+            assertTrue(File(requireNotNull(copied.path)).exists())
+
+            manager.deleteUnreferencedMedia(listOf(copied), emptyList())
+            assertFalse(File(requireNotNull(copied.path)).exists())
+            source.delete()
         }
-        val copied = manager.copyIntoExerciseMedia(listOf(source.toUri())).single()
-        val referencedExercise = Exercise(
-            id = 2,
-            name = "Referenced",
-            localMediaUris = persistedJson.encodeToString(listOf(copied.toString()))
-        )
-
-        val deleted = manager.deleteUnreferencedMedia(listOf(copied), listOf(referencedExercise))
-
-        assertEquals(0, deleted)
-        assertTrue(File(requireNotNull(copied.path)).exists())
-
-        manager.deleteUnreferencedMedia(listOf(copied), emptyList())
-        assertFalse(File(requireNotNull(copied.path)).exists())
-        source.delete()
     }
 }
