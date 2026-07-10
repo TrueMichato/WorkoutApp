@@ -108,8 +108,8 @@ class WorkoutPlanFlowTest {
         }
 
         composeRule.onNodeWithText(exerciseName).assertIsDisplayed()
-        composeRule.onNodeWithText("3 rounds").assertIsDisplayed()
-        composeRule.onNodeWithText("Tempo 31X1").assertIsDisplayed()
-        composeRule.onNodeWithText("RPE 8").assertIsDisplayed()
+        composeRule.onNodeWithText("3 rounds", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Tempo 31X1", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("RPE 8", substring = true).assertIsDisplayed()
     }
 }
