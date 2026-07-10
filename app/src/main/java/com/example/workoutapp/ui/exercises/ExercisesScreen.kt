@@ -11,12 +11,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.workoutapp.data.model.Exercise
 import com.example.workoutapp.data.model.WorkoutCategory
+import com.example.workoutapp.ui.test.TestTags
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,13 +36,15 @@ fun ExercisesScreen(
     }
 
     Scaffold(
+        modifier = Modifier.testTag(TestTags.Exercises.Screen),
         topBar = {
             TopAppBar(
                 title = { Text("Exercise Library") },
                 actions = {
                     IconButton(
                         onClick = { csvPickerLauncher.launch(arrayOf("text/comma-separated-values", "text/csv", "text/plain", "*/*")) },
-                        enabled = !uiState.isImporting
+                        enabled = !uiState.isImporting,
+                        modifier = Modifier.testTag(TestTags.Exercises.ImportButton)
                     ) {
                         if (uiState.isImporting) {
                             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -48,15 +52,23 @@ fun ExercisesScreen(
                             Icon(Icons.Default.UploadFile, "Import CSV")
                         }
                     }
-                    IconButton(onClick = { showFilterSheet = true }) {
+                    IconButton(
+                        onClick = { showFilterSheet = true },
+                        modifier = Modifier.testTag(TestTags.Exercises.FilterButton)
+                    ) {
                         Icon(Icons.Default.FilterList, "Filter")
                     }
                 }
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onNavigateToAddExercise) {
-                Icon(Icons.Default.Add, "Add Exercise")
+            if (uiState.libraryFilter == ExerciseLibraryFilter.ACTIVE) {
+                FloatingActionButton(
+                    onClick = onNavigateToAddExercise,
+                    modifier = Modifier.testTag(TestTags.Exercises.AddFab)
+                ) {
+                    Icon(Icons.Default.Add, "Add Exercise")
+                }
             }
         }
     ) { paddingValues ->
@@ -71,7 +83,8 @@ fun ExercisesScreen(
                 onValueChange = viewModel::onSearchQueryChange,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .testTag(TestTags.Exercises.SearchField),
                 placeholder = { Text("Search exercises...") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 trailingIcon = {
@@ -83,6 +96,29 @@ fun ExercisesScreen(
                 },
                 singleLine = true
             )
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                ExerciseLibraryFilter.entries.forEach { filter ->
+                    FilterChip(
+                        selected = uiState.libraryFilter == filter,
+                        onClick = { viewModel.onLibraryFilterSelected(filter) },
+                        label = { Text(filter.displayName) },
+                        leadingIcon = {
+                            Icon(
+                                if (filter == ExerciseLibraryFilter.ACTIVE) Icons.Default.FitnessCenter else Icons.Default.Archive,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        modifier = Modifier.testTag(TestTags.Exercises.libraryFilter(filter))
+                    )
+                }
+            }
 
             // Category chips
             if (uiState.selectedCategory != null) {
@@ -163,19 +199,25 @@ fun ExercisesScreen(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            "No exercises found",
+                            if (uiState.libraryFilter == ExerciseLibraryFilter.ARCHIVED) "No archived exercises" else "No exercises found",
                             style = MaterialTheme.typography.titleMedium
                         )
                         Text(
-                            "Add your first exercise!",
+                            if (uiState.libraryFilter == ExerciseLibraryFilter.ARCHIVED) {
+                                "Archived exercises will appear here for restore."
+                            } else {
+                                "Add your first exercise!"
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(16.dp))
-                        Button(onClick = onNavigateToAddExercise) {
-                            Icon(Icons.Default.Add, null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Add Exercise")
+                        if (uiState.libraryFilter == ExerciseLibraryFilter.ACTIVE) {
+                            Button(onClick = onNavigateToAddExercise) {
+                                Icon(Icons.Default.Add, null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Add Exercise")
+                            }
                         }
                     }
                 }
@@ -188,7 +230,8 @@ fun ExercisesScreen(
                         ExerciseCard(
                             exercise = exercise,
                             onClick = { onNavigateToExerciseDetail(exercise.id) },
-                            onFavoriteClick = { viewModel.toggleFavorite(exercise) }
+                            onFavoriteClick = { viewModel.toggleFavorite(exercise) },
+                            modifier = Modifier.testTag(TestTags.Exercises.exerciseCard(exercise.id))
                         )
                     }
                 }
@@ -216,10 +259,11 @@ fun ExercisesScreen(
 private fun ExerciseCard(
     exercise: Exercise,
     onClick: () -> Unit,
-    onFavoriteClick: () -> Unit
+    onFavoriteClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         onClick = onClick
     ) {
         Row(
@@ -254,6 +298,20 @@ private fun ExerciseCard(
                             style = MaterialTheme.typography.labelSmall
                         )
                     }
+                    if (exercise.isArchived) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = MaterialTheme.shapes.small
+                        ) {
+                            Text(
+                                "Archived",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
                     if (exercise.timesPerformed > 0) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
@@ -264,12 +322,14 @@ private fun ExerciseCard(
                     }
                 }
             }
-            IconButton(onClick = onFavoriteClick) {
-                Icon(
-                    if (exercise.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    contentDescription = "Favorite",
-                    tint = if (exercise.isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            if (!exercise.isArchived) {
+                IconButton(onClick = onFavoriteClick) {
+                    Icon(
+                        if (exercise.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = "Favorite",
+                        tint = if (exercise.isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }

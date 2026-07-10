@@ -1,11 +1,13 @@
 package com.example.workoutapp
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.workoutapp.data.local.WorkoutDatabase
@@ -57,7 +59,7 @@ class WorkoutPlanFlowTest {
         val exerciseName = "Planner Test Squat ${System.currentTimeMillis()}"
         val planName = "Leg Day ${System.currentTimeMillis()}"
 
-        runBlocking {
+        val exerciseId = runBlocking {
             exerciseRepository.createExerciseWithRelations(
                 exercise = Exercise(
                     name = exerciseName,
@@ -86,15 +88,19 @@ class WorkoutPlanFlowTest {
             )
         }
 
-        composeRule.onNodeWithText("Workout").performClick()
+        composeRule.onNodeWithTag(TestTags.BottomNav.Workout).performClick()
         composeRule.onNodeWithTag(TestTags.Workout.Screen).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.Workout.NewPlanButton).performClick()
 
         composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.Screen).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.NameField).performTextInput(planName)
+        composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.WorkoutPlanEditor.AddExerciseButton))
         composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.AddExerciseButton).performClick()
         composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.ExerciseSearchField).performTextInput(exerciseName)
-        composeRule.onNodeWithText(exerciseName).performClick()
+        composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.exerciseOption(exerciseId)).performClick()
+        composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.WorkoutPlanEditor.SaveAndPlayButton))
         composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.SaveAndPlayButton).performClick()
 
         composeRule.waitUntil(timeoutMillis = 5_000) {
@@ -102,11 +108,8 @@ class WorkoutPlanFlowTest {
         }
 
         composeRule.onNodeWithText(exerciseName).assertIsDisplayed()
-        composeRule.onNodeWithText("3 rounds").assertIsDisplayed()
-        composeRule.onNodeWithText("Tempo 31X1").assertIsDisplayed()
-        composeRule.onNodeWithText("RPE 8").assertIsDisplayed()
+        composeRule.onNodeWithText("3 rounds", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Tempo 31X1", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("RPE 8", substring = true).assertIsDisplayed()
     }
 }
-
-
-

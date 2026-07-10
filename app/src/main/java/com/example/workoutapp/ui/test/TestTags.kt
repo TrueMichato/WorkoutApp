@@ -3,14 +3,39 @@ package com.example.workoutapp.ui.test
 import com.example.workoutapp.data.model.PlanExerciseSection
 import com.example.workoutapp.data.model.TrainingPhase
 import com.example.workoutapp.data.model.WorkoutCategory
+import com.example.workoutapp.ui.exercises.ExerciseLibraryFilter
 
 object TestTags {
+    object BottomNav {
+        const val Dashboard = "bottom_nav_dashboard"
+        const val Exercises = "bottom_nav_exercises"
+        const val Workout = "bottom_nav_workout"
+        const val PhysicalTherapy = "bottom_nav_physical_therapy"
+        const val Settings = "bottom_nav_settings"
+
+        fun item(route: String): String = "bottom_nav_$route"
+    }
+
+    object Dashboard {
+        const val Screen = "dashboard_screen"
+        const val ContentList = "dashboard_content"
+        const val BalanceBaselineCard = "dashboard_balance_baseline_card"
+        const val BalanceScoreCard = "dashboard_balance_score_card"
+        const val GenerateWorkoutButton = "dashboard_generate_workout_button"
+    }
+
     object Exercises {
         const val Screen = "exercises_screen"
         const val SearchField = "exercises_search_field"
         const val AddFab = "exercises_add_fab"
         const val ImportButton = "exercises_import_button"
         const val FilterButton = "exercises_filter_button"
+
+        fun libraryFilter(filter: ExerciseLibraryFilter): String =
+            "exercises_filter_${filter.name.lowercase()}"
+
+        fun exerciseCard(exerciseId: Long): String =
+            "exercises_card_$exerciseId"
     }
 
     object AddEditExercise {
@@ -49,6 +74,7 @@ object TestTags {
 
     object WorkoutPlanEditor {
         const val Screen = "workout_plan_editor_screen"
+        const val ContentList = "workout_plan_editor_content"
         const val NameField = "workout_plan_editor_name"
         const val DescriptionField = "workout_plan_editor_description"
         const val NotesField = "workout_plan_editor_notes"
@@ -57,12 +83,16 @@ object TestTags {
         const val SaveAndPlayButton = "workout_plan_editor_save_and_play"
         const val ExerciseSearchField = "workout_plan_editor_exercise_search"
 
+        fun exerciseOption(exerciseId: Long): String =
+            "workout_plan_editor_exercise_$exerciseId"
+
         fun sectionChip(section: PlanExerciseSection): String =
             "workout_plan_editor_section_${section.name.lowercase()}"
     }
 
     object ActiveWorkout {
         const val Screen = "active_workout_screen"
+        const val ContentList = "active_workout_content"
         const val CurrentExerciseCard = "active_workout_current_exercise_card"
         const val DoneButton = "active_workout_done_button"
         const val SkipButton = "active_workout_skip_button"
@@ -75,6 +105,7 @@ object TestTags {
         const val RepeatLastSetButton = "active_workout_repeat_last_set_button"
         const val CompleteWorkoutButton = "active_workout_complete_button"
 
-        fun upcomingRow(sessionExerciseId: Long): String = "active_workout_upcoming_row_$sessionExerciseId"
+        fun upcomingRow(sessionExerciseId: Long): String =
+            "active_workout_upcoming_row_$sessionExerciseId"
     }
 }

@@ -52,7 +52,13 @@ class AddEditExerciseViewModel @Inject constructor(
         viewModelScope.launch {
             editingExerciseId = exerciseId
 
-            val exercise = exerciseRepository.getExerciseById(exerciseId) ?: return@launch
+            val exercise = exerciseRepository.getExerciseById(exerciseId)
+            if (exercise == null) {
+                _uiState.update {
+                    it.copy(isLoading = false, saveError = "Exercise no longer exists.")
+                }
+                return@launch
+            }
             val categories = exerciseRepository.getExerciseCategories(exerciseId)
             val equipmentIds = exerciseRepository.getRequiredEquipmentIds(exerciseId)
             val primaryMuscles = exerciseRepository.getPrimaryMuscles(exerciseId)
@@ -350,8 +356,7 @@ class AddEditExerciseViewModel @Inject constructor(
                 val presetJson = json.encodeToString(presetMap)
                 val balancedPreset = state.trainingPhasePresets.getValue(TrainingPhase.BALANCED)
 
-                val exercise = Exercise(
-                    id = editingExerciseId ?: 0,
+                val editableExercise = Exercise(
                     name = state.name.trim(),
                     description = state.description.trim(),
                     instructions = state.instructions.trim(),
@@ -369,9 +374,36 @@ class AddEditExerciseViewModel @Inject constructor(
                     updatedAt = System.currentTimeMillis()
                 )
 
-                if (editingExerciseId != null) {
+                val exerciseId = editingExerciseId
+                if (exerciseId != null) {
+                    val existing = exerciseRepository.getExerciseById(exerciseId)
+                    if (existing == null) {
+                        _uiState.update {
+                            it.copy(
+                                isSaving = false,
+                                saveError = "Exercise no longer exists. Your changes were not saved."
+                            )
+                        }
+                        return@launch
+                    }
                     exerciseRepository.updateExerciseWithRelations(
-                        exercise = exercise,
+                        exercise = existing.copy(
+                            name = editableExercise.name,
+                            description = editableExercise.description,
+                            instructions = editableExercise.instructions,
+                            tips = editableExercise.tips,
+                            difficulty = editableExercise.difficulty,
+                            isUnilateral = editableExercise.isUnilateral,
+                            isCompound = editableExercise.isCompound,
+                            defaultSets = editableExercise.defaultSets,
+                            defaultReps = editableExercise.defaultReps,
+                            defaultRestSeconds = editableExercise.defaultRestSeconds,
+                            trainingPhasePresets = editableExercise.trainingPhasePresets,
+                            localMediaUris = editableExercise.localMediaUris,
+                            externalMediaUrls = editableExercise.externalMediaUrls,
+                            personalNotes = editableExercise.personalNotes,
+                            updatedAt = editableExercise.updatedAt
+                        ),
                         categories = state.selectedCategories.toList(),
                         equipmentIds = state.selectedEquipment.map { it.id },
                         primaryMuscles = state.primaryMuscles,
@@ -379,7 +411,7 @@ class AddEditExerciseViewModel @Inject constructor(
                     )
                 } else {
                     exerciseRepository.createExerciseWithRelations(
-                        exercise = exercise,
+                        exercise = editableExercise,
                         categories = state.selectedCategories.toList(),
                         equipmentIds = state.selectedEquipment.map { it.id },
                         primaryMuscles = state.primaryMuscles,
