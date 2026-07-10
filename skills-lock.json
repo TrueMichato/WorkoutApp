@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "android-kotlin": {
+      "source": "alinaqi/claude-bootstrap",
+      "sourceType": "github",
+      "computedHash": "08562cabf7a3afb5c10800334a4b4bbb99cdc88773f6bb63d55ac924c3160489"
+    }
+  }
+}

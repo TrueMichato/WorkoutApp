@@ -1,0 +1,57 @@
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:checkDebugAarMetadata UP-TO-DATE
+> Task :app:generateDebugResValues UP-TO-DATE
+> Task :app:mapDebugSourceSetPaths UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:createDebugCompatibleScreenManifests UP-TO-DATE
+> Task :app:extractDeepLinksDebug UP-TO-DATE
+> Task :app:processDebugMainManifest UP-TO-DATE
+> Task :app:processDebugManifest UP-TO-DATE
+> Task :app:processDebugManifestForPackage UP-TO-DATE
+> Task :app:processDebugResources UP-TO-DATE
+> Task :app:kspDebugKotlin UP-TO-DATE
+> Task :app:javaPreCompileDebug UP-TO-DATE
+
+> Task :app:compileDebugKotlin FAILED
+e: file:///Users/tommichaeli/AndroidStudioProjects/WorkoutApp/app/src/main/java/com/example/workoutapp/ui/workout/WorkoutScreens.kt:107:13 Unresolved reference 'LoadingState'.
+e: file:///Users/tommichaeli/AndroidStudioProjects/WorkoutApp/app/src/main/java/com/example/workoutapp/ui/workout/WorkoutScreens.kt:126:25 Unresolved reference 'SectionHeader'.
+e: file:///Users/tommichaeli/AndroidStudioProjects/WorkoutApp/app/src/main/java/com/example/workoutapp/ui/workout/WorkoutScreens.kt:142:25 Unresolved reference 'SectionHeader'.
+e: file:///Users/tommichaeli/AndroidStudioProjects/WorkoutApp/app/src/main/java/com/example/workoutapp/ui/workout/WorkoutScreens.kt:189:13 Unresolved reference 'LoadingState'.
+e: file:///Users/tommichaeli/AndroidStudioProjects/WorkoutApp/app/src/main/java/com/example/workoutapp/ui/workout/WorkoutScreens.kt:500:34 Unresolved reference 'LoadingState'.
+e: file:///Users/tommichaeli/AndroidStudioProjects/WorkoutApp/app/src/main/java/com/example/workoutapp/ui/workout/WorkoutScreens.kt:501:40 Unresolved reference 'EmptyState'.
+e: file:///Users/tommichaeli/AndroidStudioProjects/WorkoutApp/app/src/main/java/com/example/workoutapp/ui/workout/WorkoutScreens.kt:539:37 Unresolved reference 'SessionStatusBadge'.
+e: file:///Users/tommichaeli/AndroidStudioProjects/WorkoutApp/app/src/main/java/com/example/workoutapp/ui/workout/WorkoutScreens.kt:583:25 Unresolved reference 'CompletionFeedbackCard'.
+e: file:///Users/tommichaeli/AndroidStudioProjects/WorkoutApp/app/src/main/java/com/example/workoutapp/ui/workout/WorkoutScreens.kt:620:34 Unresolved reference 'LoadingState'.
+e: file:///Users/tommichaeli/AndroidStudioProjects/WorkoutApp/app/src/main/java/com/example/workoutapp/ui/workout/WorkoutScreens.kt:621:43 Unresolved reference 'EmptyState'.
+e: file:///Users/tommichaeli/AndroidStudioProjects/WorkoutApp/app/src/main/java/com/example/workoutapp/ui/workout/WorkoutScreens.kt:739:21 Unresolved reference 'SessionStatusBadge'.
+e: file:///Users/tommichaeli/AndroidStudioProjects/WorkoutApp/app/src/main/java/com/example/workoutapp/ui/workout/WorkoutScreens.kt:944:21 Unresolved reference 'SessionStatusBadge'.
+e: file:///Users/tommichaeli/AndroidStudioProjects/WorkoutApp/app/src/main/java/com/example/workoutapp/ui/workout/WorkoutViewModel.kt:167:65 Type mismatch: inferred type is 'kotlin.Any', but 'com.example.workoutapp.ui.workout.ActiveWorkoutUiState' was expected.
+
+[Incubating] Problems report is available at: file:///Users/tommichaeli/AndroidStudioProjects/WorkoutApp/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':app:compileDebugKotlin'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.3.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 3s
+16 actionable tasks: 1 executed, 15 up-to-date

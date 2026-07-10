@@ -1,0 +1,480 @@
+package com.example.workoutapp.ui.exercises
+
+import android.net.Uri
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.workoutapp.data.model.Difficulty
+import com.example.workoutapp.data.model.Equipment
+import com.example.workoutapp.data.model.Exercise
+import com.example.workoutapp.data.model.ExerciseProgrammingPreset
+import com.example.workoutapp.data.model.MuscleGroup
+import com.example.workoutapp.data.model.TrainingPhase
+import com.example.workoutapp.data.model.WorkoutCategory
+import com.example.workoutapp.data.repository.EquipmentRepository
+import com.example.workoutapp.data.repository.ExerciseRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import javax.inject.Inject
+
+@HiltViewModel
+class AddEditExerciseViewModel @Inject constructor(
+    private val exerciseRepository: ExerciseRepository,
+    private val equipmentRepository: EquipmentRepository
+) : ViewModel() {
+
+    private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
+
+    private val _uiState = MutableStateFlow(AddEditExerciseUiState())
+    val uiState: StateFlow<AddEditExerciseUiState> = _uiState.asStateFlow()
+
+    private var editingExerciseId: Long? = null
+
+    init {
+        loadEquipment()
+    }
+
+    private fun loadEquipment() {
+        viewModelScope.launch {
+            equipmentRepository.getAllEquipment().collect { equipment ->
+                _uiState.update { it.copy(allEquipment = equipment) }
+            }
+        }
+    }
+
+    fun loadExercise(exerciseId: Long) {
+        viewModelScope.launch {
+            editingExerciseId = exerciseId
+
+            val exercise = exerciseRepository.getExerciseById(exerciseId) ?: return@launch
+            val categories = exerciseRepository.getExerciseCategories(exerciseId)
+            val equipmentIds = exerciseRepository.getRequiredEquipmentIds(exerciseId)
+            val primaryMuscles = exerciseRepository.getPrimaryMuscles(exerciseId)
+            val secondaryMuscles = exerciseRepository.getSecondaryMuscles(exerciseId)
+
+            val selectedEquipment = equipmentIds.mapNotNull { id ->
+                equipmentRepository.getEquipmentById(id)
+            }
+
+            val localUris = try {
+                json.decodeFromString<List<String>>(exercise.localMediaUris).map { Uri.parse(it) }
+            } catch (_: Exception) {
+                emptyList()
+            }
+
+            val externalUrls = try {
+                json.decodeFromString<List<String>>(exercise.externalMediaUrls)
+            } catch (_: Exception) {
+                emptyList()
+            }
+
+            val presets = mergePresetsWithDefaults(
+                encodedPresets = exercise.trainingPhasePresets,
+                defaultSets = exercise.defaultSets,
+                defaultReps = exercise.defaultReps,
+                defaultRestSeconds = exercise.defaultRestSeconds
+            )
+            val balancedPreset = presets.getValue(TrainingPhase.BALANCED)
+
+            _uiState.update { state ->
+                state.copy(
+                    name = exercise.name,
+                    description = exercise.description,
+                    instructions = exercise.instructions,
+                    tips = exercise.tips,
+                    difficulty = exercise.difficulty,
+                    selectedCategories = categories.toSet(),
+                    selectedEquipment = selectedEquipment,
+                    primaryMuscles = primaryMuscles,
+                    secondaryMuscles = secondaryMuscles,
+                    defaultSets = resolveSuggestedSetCount(balancedPreset.setsText, exercise.defaultSets),
+                    defaultReps = balancedPreset.repsText,
+                    defaultRestSeconds = balancedPreset.restSeconds,
+                    defaultRounds = balancedPreset.rounds,
+                    defaultDurationSeconds = balancedPreset.durationSeconds,
+                    defaultTempo = balancedPreset.tempo,
+                    defaultEffortTarget = balancedPreset.effortTarget,
+                    trainingPhasePresets = presets,
+                    isCompound = exercise.isCompound,
+                    isUnilateral = exercise.isUnilateral,
+                    localMediaUris = localUris,
+                    externalUrls = externalUrls,
+                    personalNotes = exercise.personalNotes,
+                    isLoading = false
+                )
+            }
+        }
+    }
+
+    fun updateName(name: String) {
+        _uiState.update {
+            it.copy(
+                name = name,
+                nameError = if (name.isBlank()) "Name is required" else null,
+                saveError = null
+            )
+        }
+    }
+
+    fun updateDescription(description: String) {
+        _uiState.update { it.copy(description = description, saveError = null) }
+    }
+
+    fun updateInstructions(instructions: String) {
+        _uiState.update { it.copy(instructions = instructions, saveError = null) }
+    }
+
+    fun updateTips(tips: String) {
+        _uiState.update { it.copy(tips = tips, saveError = null) }
+    }
+
+    fun updateDifficulty(difficulty: Difficulty) {
+        _uiState.update { it.copy(difficulty = difficulty, saveError = null) }
+    }
+
+    fun toggleCategory(category: WorkoutCategory) {
+        _uiState.update { state ->
+            val newCategories = if (category in state.selectedCategories) {
+                state.selectedCategories - category
+            } else {
+                state.selectedCategories + category
+            }
+            state.copy(selectedCategories = newCategories, saveError = null)
+        }
+    }
+
+    fun toggleEquipment(equipment: Equipment) {
+        _uiState.update { state ->
+            val current = state.selectedEquipment
+            val newEquipment = if (current.any { it.id == equipment.id }) {
+                current.filter { it.id != equipment.id }
+            } else {
+                current + equipment
+            }
+            state.copy(selectedEquipment = newEquipment, saveError = null)
+        }
+    }
+
+    fun removeEquipment(equipment: Equipment) {
+        _uiState.update { state ->
+            state.copy(selectedEquipment = state.selectedEquipment.filter { it.id != equipment.id }, saveError = null)
+        }
+    }
+
+    fun createCustomEquipment(name: String, description: String, isPortable: Boolean) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            val newId = equipmentRepository.createEquipment(name.trim(), description.trim(), isPortable)
+            val newEquipment = equipmentRepository.getEquipmentById(newId) ?: return@launch
+            _uiState.update { state ->
+                if (state.selectedEquipment.any { it.id == newId }) state
+                else state.copy(selectedEquipment = state.selectedEquipment + newEquipment, saveError = null)
+            }
+        }
+    }
+
+    fun togglePrimaryMuscle(muscle: MuscleGroup) {
+        _uiState.update { state ->
+            val newPrimary = if (muscle in state.primaryMuscles) state.primaryMuscles - muscle else state.primaryMuscles + muscle
+            val newSecondary = state.secondaryMuscles - muscle
+            state.copy(primaryMuscles = newPrimary, secondaryMuscles = newSecondary, saveError = null)
+        }
+    }
+
+    fun toggleSecondaryMuscle(muscle: MuscleGroup) {
+        _uiState.update { state ->
+            val newSecondary = if (muscle in state.secondaryMuscles) state.secondaryMuscles - muscle else state.secondaryMuscles + muscle
+            val newPrimary = state.primaryMuscles - muscle
+            state.copy(secondaryMuscles = newSecondary, primaryMuscles = newPrimary, saveError = null)
+        }
+    }
+
+    fun removePrimaryMuscle(muscle: MuscleGroup) {
+        _uiState.update { state ->
+            state.copy(primaryMuscles = state.primaryMuscles - muscle, saveError = null)
+        }
+    }
+
+    fun removeSecondaryMuscle(muscle: MuscleGroup) {
+        _uiState.update { state ->
+            state.copy(secondaryMuscles = state.secondaryMuscles - muscle, saveError = null)
+        }
+    }
+
+    fun updateDefaultSets(sets: Int) {
+        val resolved = sets.coerceIn(1, 20)
+        _uiState.update { state ->
+            val updatedPresets = state.trainingPhasePresets.toMutableMap().apply {
+                this[TrainingPhase.BALANCED] = getValue(TrainingPhase.BALANCED).copy(setsText = resolved.toString())
+            }
+            state.copy(defaultSets = resolved, trainingPhasePresets = updatedPresets, saveError = null)
+        }
+    }
+
+    fun updateDefaultReps(reps: String) {
+        _uiState.update { state ->
+            val updatedPresets = state.trainingPhasePresets.toMutableMap().apply {
+                this[TrainingPhase.BALANCED] = getValue(TrainingPhase.BALANCED).copy(repsText = reps)
+            }
+            state.copy(defaultReps = reps, trainingPhasePresets = updatedPresets, saveError = null)
+        }
+    }
+
+    fun updateDefaultRest(seconds: Int) {
+        val resolved = seconds.coerceIn(0, 600)
+        _uiState.update { state ->
+            val updatedPresets = state.trainingPhasePresets.toMutableMap().apply {
+                this[TrainingPhase.BALANCED] = getValue(TrainingPhase.BALANCED).copy(restSeconds = resolved)
+            }
+            state.copy(defaultRestSeconds = resolved, trainingPhasePresets = updatedPresets, saveError = null)
+        }
+    }
+
+    fun updateDefaultRounds(value: String) {
+        val parsed = value.toIntOrNull()?.coerceIn(1, 20) ?: return
+        _uiState.update { state ->
+            val updatedPresets = state.trainingPhasePresets.toMutableMap().apply {
+                this[TrainingPhase.BALANCED] = getValue(TrainingPhase.BALANCED).copy(rounds = parsed)
+            }
+            state.copy(defaultRounds = parsed, trainingPhasePresets = updatedPresets, saveError = null)
+        }
+    }
+
+    fun updateDefaultDuration(value: String) {
+        val parsed = value.toIntOrNull()?.coerceIn(1, 3600)
+        _uiState.update { state ->
+            val updatedPresets = state.trainingPhasePresets.toMutableMap().apply {
+                this[TrainingPhase.BALANCED] = getValue(TrainingPhase.BALANCED).copy(durationSeconds = parsed)
+            }
+            state.copy(defaultDurationSeconds = parsed, trainingPhasePresets = updatedPresets, saveError = null)
+        }
+    }
+
+    fun updateDefaultTempo(value: String) {
+        _uiState.update { state ->
+            val updatedPresets = state.trainingPhasePresets.toMutableMap().apply {
+                this[TrainingPhase.BALANCED] = getValue(TrainingPhase.BALANCED).copy(tempo = value)
+            }
+            state.copy(defaultTempo = value, trainingPhasePresets = updatedPresets, saveError = null)
+        }
+    }
+
+    fun updateDefaultEffortTarget(value: String) {
+        _uiState.update { state ->
+            val updatedPresets = state.trainingPhasePresets.toMutableMap().apply {
+                this[TrainingPhase.BALANCED] = getValue(TrainingPhase.BALANCED).copy(effortTarget = value)
+            }
+            state.copy(defaultEffortTarget = value, trainingPhasePresets = updatedPresets, saveError = null)
+        }
+    }
+
+    fun selectPresetPhase(phase: TrainingPhase) {
+        _uiState.update { it.copy(selectedPresetPhase = phase) }
+    }
+
+    fun updatePresetSetsText(value: String) = updatePreset { copy(setsText = value) }
+    fun updatePresetRepsText(value: String) = updatePreset { copy(repsText = value) }
+    fun updatePresetRestSeconds(value: Int) = updatePreset { copy(restSeconds = value.coerceIn(0, 600)) }
+    fun updatePresetRounds(value: String) {
+        val parsed = value.toIntOrNull()?.coerceIn(1, 20) ?: return
+        updatePreset { copy(rounds = parsed) }
+    }
+    fun updatePresetDuration(value: String) = updatePreset { copy(durationSeconds = value.toIntOrNull()?.coerceIn(1, 3600)) }
+    fun updatePresetTempo(value: String) = updatePreset { copy(tempo = value) }
+    fun updatePresetEffortTarget(value: String) = updatePreset { copy(effortTarget = value) }
+    fun updatePresetNotes(value: String) = updatePreset { copy(notes = value) }
+
+    private fun updatePreset(transform: ExerciseProgrammingPreset.() -> ExerciseProgrammingPreset) {
+        _uiState.update { state ->
+            val phase = state.selectedPresetPhase
+            val updatedPresets = state.trainingPhasePresets.toMutableMap().apply {
+                this[phase] = (this[phase] ?: defaultPresetForPhase(phase, state.defaultSets, state.defaultReps, state.defaultRestSeconds)).transform()
+            }
+            state.copy(trainingPhasePresets = updatedPresets, saveError = null)
+        }
+    }
+
+    fun updateIsCompound(isCompound: Boolean) {
+        _uiState.update { it.copy(isCompound = isCompound, saveError = null) }
+    }
+
+    fun updateIsUnilateral(isUnilateral: Boolean) {
+        _uiState.update { it.copy(isUnilateral = isUnilateral, saveError = null) }
+    }
+
+    fun addLocalMedia(uris: List<Uri>) {
+        _uiState.update { state -> state.copy(localMediaUris = state.localMediaUris + uris, saveError = null) }
+    }
+
+    fun removeLocalMedia(uri: Uri) {
+        _uiState.update { state -> state.copy(localMediaUris = state.localMediaUris - uri, saveError = null) }
+    }
+
+    fun addExternalUrl(url: String) {
+        if (url.isNotBlank()) {
+            _uiState.update { state -> state.copy(externalUrls = state.externalUrls + url, saveError = null) }
+        }
+    }
+
+    fun removeExternalUrl(url: String) {
+        _uiState.update { state -> state.copy(externalUrls = state.externalUrls - url, saveError = null) }
+    }
+
+    fun updatePersonalNotes(notes: String) {
+        _uiState.update { it.copy(personalNotes = notes, saveError = null) }
+    }
+
+    fun saveExercise() {
+        val state = _uiState.value
+
+        if (state.name.isBlank()) {
+            _uiState.update { it.copy(nameError = "Name is required") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true, saveError = null) }
+
+            try {
+                val localMediaJson = json.encodeToString(state.localMediaUris.map { it.toString() })
+                val externalMediaJson = json.encodeToString(state.externalUrls)
+                val presetMap = state.trainingPhasePresets.mapKeys { it.key.name }
+                val presetJson = json.encodeToString(presetMap)
+                val balancedPreset = state.trainingPhasePresets.getValue(TrainingPhase.BALANCED)
+
+                val exercise = Exercise(
+                    id = editingExerciseId ?: 0,
+                    name = state.name.trim(),
+                    description = state.description.trim(),
+                    instructions = state.instructions.trim(),
+                    tips = state.tips.trim(),
+                    difficulty = state.difficulty,
+                    isUnilateral = state.isUnilateral,
+                    isCompound = state.isCompound,
+                    defaultSets = resolveSuggestedSetCount(balancedPreset.setsText, state.defaultSets),
+                    defaultReps = balancedPreset.repsText.ifBlank { state.defaultReps },
+                    defaultRestSeconds = balancedPreset.restSeconds,
+                    trainingPhasePresets = presetJson,
+                    localMediaUris = localMediaJson,
+                    externalMediaUrls = externalMediaJson,
+                    personalNotes = state.personalNotes.trim(),
+                    updatedAt = System.currentTimeMillis()
+                )
+
+                val exerciseId = if (editingExerciseId != null) {
+                    exerciseRepository.updateExercise(exercise)
+                    editingExerciseId!!
+                } else {
+                    exerciseRepository.insertExercise(exercise)
+                }
+
+                exerciseRepository.setExerciseCategories(exerciseId, state.selectedCategories.toList())
+                exerciseRepository.setExerciseEquipment(exerciseId, state.selectedEquipment.map { it.id })
+                exerciseRepository.setExerciseMuscles(exerciseId, state.primaryMuscles, state.secondaryMuscles)
+
+                _uiState.update { it.copy(isSaving = false, saveSuccess = true) }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(isSaving = false, saveError = e.message ?: "Failed to save exercise")
+                }
+            }
+        }
+    }
+
+    private fun mergePresetsWithDefaults(
+        encodedPresets: String,
+        defaultSets: Int,
+        defaultReps: String,
+        defaultRestSeconds: Int
+    ): Map<TrainingPhase, ExerciseProgrammingPreset> {
+        val seeded = TrainingPhase.entries.associateWith {
+            defaultPresetForPhase(it, defaultSets, defaultReps, defaultRestSeconds)
+        }.toMutableMap()
+        val stored = try {
+            json.decodeFromString<Map<String, ExerciseProgrammingPreset>>(encodedPresets)
+        } catch (_: Exception) {
+            emptyMap()
+        }
+        stored.forEach { (phaseName, preset) ->
+            TrainingPhase.entries.find { it.name == phaseName }?.let { seeded[it] = preset }
+        }
+        return seeded
+    }
+
+    private fun defaultPresetForPhase(
+        phase: TrainingPhase,
+        defaultSets: Int,
+        defaultReps: String,
+        defaultRestSeconds: Int
+    ): ExerciseProgrammingPreset = when (phase) {
+        TrainingPhase.BALANCED -> ExerciseProgrammingPreset(
+            setsText = defaultSets.toString(),
+            repsText = defaultReps,
+            restSeconds = defaultRestSeconds
+        )
+        TrainingPhase.STRENGTH_FOCUS -> ExerciseProgrammingPreset("4-6", "3-6", 150, notes = "Lower reps with longer recovery.")
+        TrainingPhase.HYPERTROPHY_FOCUS -> ExerciseProgrammingPreset("3-5", "6-12", 75, notes = "Moderate reps and manageable rest for muscle gain.")
+        TrainingPhase.ENDURANCE_FOCUS -> ExerciseProgrammingPreset("2-4", "15-30", 45, notes = "Higher reps and shorter rest for stamina.")
+        TrainingPhase.SKILL_ACQUISITION -> ExerciseProgrammingPreset("3-6", "2-5", 90, notes = "Crisp quality reps with space to reset technique.")
+        TrainingPhase.RECOVERY -> ExerciseProgrammingPreset("2-3", "5-8", 45, notes = "Easy volume that supports recovery.")
+        TrainingPhase.MARTIAL_ARTS_FOCUS -> ExerciseProgrammingPreset("3-5", "60-180s rounds", 60, notes = "Conditioning-style rounds for fight prep.")
+        TrainingPhase.MOBILITY_REHAB -> ExerciseProgrammingPreset("2-4", "5-10 reps / 30-60s", 30, notes = "Controlled mobility and corrective work.")
+    }
+
+    private fun resolveSuggestedSetCount(setsText: String, fallback: Int): Int {
+        val numbers = Regex("\\d+").findAll(setsText).mapNotNull { it.value.toIntOrNull() }.toList()
+        return when {
+            numbers.isEmpty() -> fallback
+            numbers.size == 1 -> numbers.first().coerceIn(1, 20)
+            else -> ((numbers.first() + numbers.last()) / 2).coerceIn(1, 20)
+        }
+    }
+}
+
+data class AddEditExerciseUiState(
+    val name: String = "",
+    val nameError: String? = null,
+    val description: String = "",
+    val instructions: String = "",
+    val tips: String = "",
+    val difficulty: Difficulty = Difficulty.INTERMEDIATE,
+    val selectedCategories: Set<WorkoutCategory> = emptySet(),
+    val allEquipment: List<Equipment> = emptyList(),
+    val selectedEquipment: List<Equipment> = emptyList(),
+    val primaryMuscles: List<MuscleGroup> = emptyList(),
+    val secondaryMuscles: List<MuscleGroup> = emptyList(),
+    val defaultSets: Int = 3,
+    val defaultReps: String = "8-12",
+    val defaultRestSeconds: Int = 90,
+    val defaultRounds: Int = 1,
+    val defaultDurationSeconds: Int? = null,
+    val defaultTempo: String = "",
+    val defaultEffortTarget: String = "",
+    val selectedPresetPhase: TrainingPhase = TrainingPhase.STRENGTH_FOCUS,
+    val trainingPhasePresets: Map<TrainingPhase, ExerciseProgrammingPreset> = TrainingPhase.entries.associateWith {
+        when (it) {
+            TrainingPhase.BALANCED -> ExerciseProgrammingPreset("3", "8-12", 90)
+            TrainingPhase.STRENGTH_FOCUS -> ExerciseProgrammingPreset("4-6", "3-6", 150)
+            TrainingPhase.HYPERTROPHY_FOCUS -> ExerciseProgrammingPreset("3-5", "6-12", 75)
+            TrainingPhase.ENDURANCE_FOCUS -> ExerciseProgrammingPreset("2-4", "15-30", 45)
+            TrainingPhase.SKILL_ACQUISITION -> ExerciseProgrammingPreset("3-6", "2-5", 90)
+            TrainingPhase.RECOVERY -> ExerciseProgrammingPreset("2-3", "5-8", 45)
+            TrainingPhase.MARTIAL_ARTS_FOCUS -> ExerciseProgrammingPreset("3-5", "60-180s rounds", 60)
+            TrainingPhase.MOBILITY_REHAB -> ExerciseProgrammingPreset("2-4", "5-10 reps / 30-60s", 30)
+        }
+    },
+    val isCompound: Boolean = true,
+    val isUnilateral: Boolean = false,
+    val localMediaUris: List<Uri> = emptyList(),
+    val externalUrls: List<String> = emptyList(),
+    val personalNotes: String = "",
+    val isLoading: Boolean = false,
+    val isSaving: Boolean = false,
+    val saveSuccess: Boolean = false,
+    val saveError: String? = null
+)

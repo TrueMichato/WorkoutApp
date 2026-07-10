@@ -1,0 +1,294 @@
+package com.example.workoutapp.data.csv
+
+import android.content.Context
+import android.net.Uri
+import com.example.workoutapp.data.model.Difficulty
+import com.example.workoutapp.data.model.Equipment
+import com.example.workoutapp.data.model.Exercise
+import com.example.workoutapp.data.model.ExerciseProgrammingPreset
+import com.example.workoutapp.data.model.MuscleGroup
+import com.example.workoutapp.data.model.TrainingPhase
+import com.example.workoutapp.data.model.WorkoutCategory
+import com.example.workoutapp.data.repository.EquipmentRepository
+import com.example.workoutapp.data.repository.ExerciseRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.first
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.io.BufferedReader
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class ExerciseCsvImporter @Inject constructor(
+    @param:ApplicationContext private val context: Context,
+    private val exerciseRepository: ExerciseRepository,
+    private val equipmentRepository: EquipmentRepository
+) {
+    private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
+
+    suspend fun importFromUri(uri: Uri): ExerciseCsvImportResult {
+        val csvText = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use(BufferedReader::readText)
+            ?: return ExerciseCsvImportResult(
+                importedCount = 0,
+                skippedCount = 1,
+                errors = listOf("Unable to read the selected CSV file.")
+            )
+
+        val records = ExerciseCsvParser.parse(csvText)
+        if (records.isEmpty()) {
+            return ExerciseCsvImportResult(
+                importedCount = 0,
+                skippedCount = 1,
+                errors = listOf("The CSV file did not contain any importable rows.")
+            )
+        }
+
+        val existingNames = exerciseRepository.getAllExercises().first()
+            .map { it.name.trim().lowercase() }
+            .toMutableSet()
+        val equipmentCache = equipmentRepository.getAllEquipment().first()
+            .associateBy { it.name.trim().lowercase() }
+            .toMutableMap()
+
+        var imported = 0
+        var skipped = 0
+        val errors = mutableListOf<String>()
+
+        records.forEachIndexed { index, record ->
+            val rowNumber = index + 2
+            try {
+                val name = record.required("name")
+                val normalizedName = name.lowercase()
+                if (normalizedName in existingNames) {
+                    skipped += 1
+                    errors += "Row $rowNumber: exercise \"$name\" already exists and was skipped."
+                    return@forEachIndexed
+                }
+
+                val categories = parseCategories(record["categories"])
+                if (categories.isEmpty()) {
+                    skipped += 1
+                    errors += "Row $rowNumber: at least one valid category is required."
+                    return@forEachIndexed
+                }
+
+                val difficulty = parseDifficulty(record["difficulty"])
+                val defaultSets = record["default_sets"]?.toIntOrNull()?.coerceIn(1, 20) ?: 3
+                val defaultReps = record["default_reps"].orEmpty().ifBlank { "8-12" }
+                val defaultRest = record["default_rest_seconds"]?.toIntOrNull()?.coerceIn(0, 600) ?: 90
+                val estimatedDurationSeconds = record["estimated_duration_seconds"]?.toIntOrNull()?.coerceIn(30, 3600) ?: 180
+                val presets = buildPhasePresets(record, defaultSets, defaultReps, defaultRest)
+
+                val equipmentIds = resolveEquipmentIds(record["equipment"], equipmentCache)
+                val exercise = Exercise(
+                    name = name,
+                    description = record["description"].orEmpty(),
+                    instructions = record["instructions"].orEmpty(),
+                    tips = record["tips"].orEmpty(),
+                    difficulty = difficulty,
+                    isCompound = record.boolean("is_compound", true),
+                    isUnilateral = record.boolean("is_unilateral", false),
+                    defaultSets = defaultSets,
+                    defaultReps = defaultReps,
+                    defaultRestSeconds = defaultRest,
+                    estimatedDurationSeconds = estimatedDurationSeconds,
+                    trainingPhasePresets = json.encodeToString(presets.mapKeys { it.key.name }),
+                    personalNotes = record["personal_notes"].orEmpty()
+                )
+                val exerciseId = exerciseRepository.insertExercise(exercise)
+                exerciseRepository.setExerciseCategories(exerciseId, categories)
+                exerciseRepository.setExerciseEquipment(exerciseId, equipmentIds)
+                exerciseRepository.setExerciseMuscles(
+                    exerciseId = exerciseId,
+                    primary = parseMuscles(record["primary_muscles"]),
+                    secondary = parseMuscles(record["secondary_muscles"])
+                )
+                existingNames += normalizedName
+                imported += 1
+            } catch (e: IllegalArgumentException) {
+                skipped += 1
+                errors += "Row $rowNumber: ${e.message}"
+            } catch (e: Exception) {
+                skipped += 1
+                errors += "Row $rowNumber: ${e.message ?: "Unexpected import error."}"
+            }
+        }
+
+        return ExerciseCsvImportResult(
+            importedCount = imported,
+            skippedCount = skipped,
+            errors = errors
+        )
+    }
+
+    private suspend fun resolveEquipmentIds(
+        rawEquipment: String?,
+        equipmentCache: MutableMap<String, Equipment>
+    ): List<Long> {
+        val ids = mutableListOf<Long>()
+        tokenize(rawEquipment).forEach { equipmentName ->
+            val key = equipmentName.lowercase()
+            val equipment = equipmentCache[key] ?: run {
+                val newId = equipmentRepository.createEquipment(equipmentName, isPortable = false)
+                val created = equipmentRepository.getEquipmentById(newId)
+                    ?: error("Failed to create equipment \"$equipmentName\".")
+                equipmentCache[key] = created
+                created
+            }
+            ids += equipment.id
+        }
+        return ids.distinct()
+    }
+
+    private fun buildPhasePresets(
+        record: CsvRecord,
+        defaultSets: Int,
+        defaultReps: String,
+        defaultRest: Int
+    ): Map<TrainingPhase, ExerciseProgrammingPreset> {
+        val presets = mutableMapOf<TrainingPhase, ExerciseProgrammingPreset>()
+        TrainingPhase.entries.forEach { phase ->
+            val prefix = phase.name.lowercase()
+            val sets = record["${prefix}_sets"]?.takeIf { it.isNotBlank() }
+            val reps = record["${prefix}_reps"]?.takeIf { it.isNotBlank() }
+            val rest = record["${prefix}_rest"]?.toIntOrNull()
+            val notes = record["${prefix}_notes"].orEmpty()
+            if (sets != null || reps != null || rest != null || notes.isNotBlank()) {
+                presets[phase] = ExerciseProgrammingPreset(
+                    setsText = sets ?: if (phase == TrainingPhase.BALANCED) defaultSets.toString() else defaultPresetForPhase(phase).setsText,
+                    repsText = reps ?: if (phase == TrainingPhase.BALANCED) defaultReps else defaultPresetForPhase(phase).repsText,
+                    restSeconds = (rest ?: if (phase == TrainingPhase.BALANCED) defaultRest else defaultPresetForPhase(phase).restSeconds).coerceIn(0, 600),
+                    notes = notes.ifBlank { if (phase == TrainingPhase.BALANCED) "" else defaultPresetForPhase(phase).notes }
+                )
+            }
+        }
+        return presets
+    }
+
+    private fun defaultPresetForPhase(phase: TrainingPhase): ExerciseProgrammingPreset = when (phase) {
+        TrainingPhase.BALANCED -> ExerciseProgrammingPreset("3", "8-12", 90)
+        TrainingPhase.STRENGTH_FOCUS -> ExerciseProgrammingPreset("4-6", "3-6", 150, notes = "Lower reps with longer recovery.")
+        TrainingPhase.HYPERTROPHY_FOCUS -> ExerciseProgrammingPreset("3-5", "6-12", 75, notes = "Moderate reps and manageable rest for muscle gain.")
+        TrainingPhase.ENDURANCE_FOCUS -> ExerciseProgrammingPreset("2-4", "15-30", 45, notes = "Higher reps and shorter rest for stamina.")
+        TrainingPhase.SKILL_ACQUISITION -> ExerciseProgrammingPreset("3-6", "2-5", 90, notes = "Crisp quality reps with space to reset technique.")
+        TrainingPhase.RECOVERY -> ExerciseProgrammingPreset("2-3", "5-8", 45, notes = "Easy volume that supports recovery.")
+        TrainingPhase.MARTIAL_ARTS_FOCUS -> ExerciseProgrammingPreset("3-5", "60-180s rounds", 60, notes = "Conditioning-style rounds for fight prep.")
+        TrainingPhase.MOBILITY_REHAB -> ExerciseProgrammingPreset("2-4", "5-10 reps / 30-60s", 30, notes = "Controlled mobility and corrective work.")
+    }
+}
+
+data class ExerciseCsvImportResult(
+    val importedCount: Int,
+    val skippedCount: Int,
+    val errors: List<String>
+) {
+    val summary: String
+        get() = buildString {
+            append("Imported $importedCount exercise")
+            if (importedCount != 1) append('s')
+            if (skippedCount > 0) {
+                append(" • skipped $skippedCount")
+            }
+        }
+}
+
+data class CsvRecord(private val values: Map<String, String>) {
+    operator fun get(key: String): String? = values[normalizeHeader(key)]
+
+    fun required(key: String): String {
+        return get(key)?.takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("Missing required column \"$key\".")
+    }
+
+    fun boolean(key: String, default: Boolean): Boolean {
+        val raw = get(key)?.trim()?.lowercase().orEmpty()
+        return when (raw) {
+            "true", "yes", "y", "1" -> true
+            "false", "no", "n", "0" -> false
+            "" -> default
+            else -> default
+        }
+    }
+}
+
+object ExerciseCsvParser {
+    fun parse(csvText: String): List<CsvRecord> {
+        val rows = csvText
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .split('\n')
+            .filter { it.isNotBlank() }
+        if (rows.isEmpty()) return emptyList()
+
+        val headers = parseLine(rows.first()).map(::normalizeHeader)
+        return rows.drop(1).mapNotNull { row ->
+            val cells = parseLine(row)
+            if (cells.all { it.isBlank() }) return@mapNotNull null
+            val values = headers.mapIndexed { index, header ->
+                header to cells.getOrElse(index) { "" }.trim()
+            }.toMap()
+            CsvRecord(values)
+        }
+    }
+
+    fun parseLine(line: String): List<String> {
+        val result = mutableListOf<String>()
+        val current = StringBuilder()
+        var inQuotes = false
+        var index = 0
+        while (index < line.length) {
+            val char = line[index]
+            when {
+                char == '"' && inQuotes && index + 1 < line.length && line[index + 1] == '"' -> {
+                    current.append('"')
+                    index += 1
+                }
+                char == '"' -> inQuotes = !inQuotes
+                char == ',' && !inQuotes -> {
+                    result += current.toString()
+                    current.clear()
+                }
+                else -> current.append(char)
+            }
+            index += 1
+        }
+        result += current.toString()
+        return result
+    }
+}
+
+private fun normalizeHeader(header: String): String =
+    header.trim().lowercase().replace(' ', '_')
+
+private fun parseDifficulty(raw: String?): Difficulty {
+    val value = raw?.trim().orEmpty()
+    return Difficulty.entries.firstOrNull {
+        it.name.equals(value, ignoreCase = true) || it.displayName.equals(value, ignoreCase = true)
+    } ?: Difficulty.INTERMEDIATE
+}
+
+private fun parseCategories(raw: String?): List<WorkoutCategory> =
+    tokenize(raw).mapNotNull { token ->
+        WorkoutCategory.entries.firstOrNull {
+            it.name.equals(token.replace(' ', '_'), ignoreCase = true) ||
+                it.displayName.equals(token, ignoreCase = true)
+        }
+    }.filter { it != WorkoutCategory.CUSTOM }.distinct()
+
+private fun parseMuscles(raw: String?): List<MuscleGroup> =
+    tokenize(raw).mapNotNull { token ->
+        MuscleGroup.entries.firstOrNull {
+            it.name.equals(token.replace(' ', '_'), ignoreCase = true) ||
+                it.displayName.equals(token, ignoreCase = true)
+        }
+    }.distinct()
+
+private fun tokenize(raw: String?): List<String> =
+    raw.orEmpty()
+        .split('|', ';', ',')
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+
+
+

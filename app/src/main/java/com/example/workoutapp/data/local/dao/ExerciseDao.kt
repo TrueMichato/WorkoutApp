@@ -1,0 +1,172 @@
+package com.example.workoutapp.data.local.dao
+
+import androidx.room.*
+import com.example.workoutapp.data.model.*
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface ExerciseDao {
+
+    // Basic CRUD
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(exercise: Exercise): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(exercises: List<Exercise>): List<Long>
+
+    @Update
+    suspend fun update(exercise: Exercise)
+
+    @Delete
+    suspend fun delete(exercise: Exercise)
+
+    @Query("DELETE FROM exercises WHERE id = :exerciseId")
+    suspend fun deleteById(exerciseId: Long)
+
+    // Queries
+    @Query("SELECT * FROM exercises WHERE id = :id")
+    suspend fun getById(id: Long): Exercise?
+
+    @Query("SELECT * FROM exercises WHERE id = :id")
+    fun getByIdFlow(id: Long): Flow<Exercise?>
+
+    @Query("SELECT * FROM exercises WHERE isArchived = 0 ORDER BY name ASC")
+    fun getAllActive(): Flow<List<Exercise>>
+
+    @Query("SELECT * FROM exercises ORDER BY name ASC")
+    fun getAll(): Flow<List<Exercise>>
+
+    @Query("SELECT * FROM exercises WHERE isFavorite = 1 AND isArchived = 0 ORDER BY name ASC")
+    fun getFavorites(): Flow<List<Exercise>>
+
+    @Query("SELECT * FROM exercises WHERE isArchived = 0 ORDER BY lastPerformedAt DESC LIMIT :limit")
+    fun getRecentlyPerformed(limit: Int = 20): Flow<List<Exercise>>
+
+    @Query("SELECT * FROM exercises WHERE isArchived = 0 ORDER BY timesPerformed DESC LIMIT :limit")
+    fun getMostPerformed(limit: Int = 20): Flow<List<Exercise>>
+
+    @Query("""
+        SELECT * FROM exercises 
+        WHERE isArchived = 0 
+        AND (lastPerformedAt IS NULL OR lastPerformedAt < :beforeTimestamp)
+        ORDER BY lastPerformedAt ASC, timesPerformed ASC
+        LIMIT :limit
+    """)
+    fun getNeglected(beforeTimestamp: Long, limit: Int = 20): Flow<List<Exercise>>
+
+    // Search
+    @Query("""
+        SELECT * FROM exercises 
+        WHERE isArchived = 0 
+        AND (name LIKE '%' || :query || '%' OR description LIKE '%' || :query || '%')
+        ORDER BY name ASC
+    """)
+    fun search(query: String): Flow<List<Exercise>>
+
+    // By difficulty
+    @Query("SELECT * FROM exercises WHERE difficulty = :difficulty AND isArchived = 0 ORDER BY name ASC")
+    fun getByDifficulty(difficulty: Difficulty): Flow<List<Exercise>>
+
+    // Update tracking fields
+    @Query("UPDATE exercises SET lastPerformedAt = :timestamp, timesPerformed = timesPerformed + 1, updatedAt = :timestamp WHERE id = :exerciseId")
+    suspend fun markPerformed(exerciseId: Long, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE exercises SET isFavorite = :isFavorite, updatedAt = :timestamp WHERE id = :exerciseId")
+    suspend fun setFavorite(exerciseId: Long, isFavorite: Boolean, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE exercises SET isArchived = :isArchived, updatedAt = :timestamp WHERE id = :exerciseId")
+    suspend fun setArchived(exerciseId: Long, isArchived: Boolean, timestamp: Long = System.currentTimeMillis())
+
+    // Category cross-references
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCategoryRef(ref: ExerciseCategoryCrossRef)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCategoryRefs(refs: List<ExerciseCategoryCrossRef>)
+
+    @Query("DELETE FROM exercise_categories WHERE exerciseId = :exerciseId")
+    suspend fun clearCategoriesForExercise(exerciseId: Long)
+
+    @Query("SELECT category FROM exercise_categories WHERE exerciseId = :exerciseId")
+    suspend fun getCategoriesForExercise(exerciseId: Long): List<WorkoutCategory>
+
+    @Query("SELECT exerciseId FROM exercise_categories WHERE category = :category")
+    suspend fun getExerciseIdsForCategory(category: WorkoutCategory): List<Long>
+
+    @Query("""
+        SELECT e.* FROM exercises e
+        INNER JOIN exercise_categories ec ON e.id = ec.exerciseId
+        WHERE ec.category = :category AND e.isArchived = 0
+        ORDER BY e.name ASC
+    """)
+    fun getExercisesByCategory(category: WorkoutCategory): Flow<List<Exercise>>
+
+    // Equipment cross-references
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertEquipmentRef(ref: ExerciseEquipmentCrossRef)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertEquipmentRefs(refs: List<ExerciseEquipmentCrossRef>)
+
+    @Query("DELETE FROM exercise_equipment WHERE exerciseId = :exerciseId")
+    suspend fun clearEquipmentForExercise(exerciseId: Long)
+
+    @Query("SELECT equipmentId FROM exercise_equipment WHERE exerciseId = :exerciseId AND isRequired = 1")
+    suspend fun getRequiredEquipmentIds(exerciseId: Long): List<Long>
+
+    @Query("""
+        SELECT e.* FROM exercises e
+        INNER JOIN exercise_equipment ee ON e.id = ee.exerciseId
+        WHERE ee.equipmentId = :equipmentId AND e.isArchived = 0
+        ORDER BY e.name ASC
+    """)
+    fun getExercisesByEquipment(equipmentId: Long): Flow<List<Exercise>>
+
+    // Muscle group cross-references
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMuscleRef(ref: ExerciseMuscleCrossRef)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMuscleRefs(refs: List<ExerciseMuscleCrossRef>)
+
+    @Query("DELETE FROM exercise_muscles WHERE exerciseId = :exerciseId")
+    suspend fun clearMusclesForExercise(exerciseId: Long)
+
+    @Query("SELECT muscleGroup FROM exercise_muscles WHERE exerciseId = :exerciseId AND isPrimary = 1")
+    suspend fun getPrimaryMuscles(exerciseId: Long): List<MuscleGroup>
+
+    @Query("SELECT muscleGroup FROM exercise_muscles WHERE exerciseId = :exerciseId AND isPrimary = 0")
+    suspend fun getSecondaryMuscles(exerciseId: Long): List<MuscleGroup>
+
+    @Query("""
+        SELECT e.* FROM exercises e
+        INNER JOIN exercise_muscles em ON e.id = em.exerciseId
+        WHERE em.muscleGroup = :muscleGroup AND e.isArchived = 0
+        ORDER BY e.name ASC
+    """)
+    fun getExercisesByMuscle(muscleGroup: MuscleGroup): Flow<List<Exercise>>
+
+    // Custom categories
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCustomCategory(category: CustomCategory): Long
+
+    @Query("SELECT * FROM custom_categories ORDER BY name ASC")
+    fun getAllCustomCategories(): Flow<List<CustomCategory>>
+
+    @Delete
+    suspend fun deleteCustomCategory(category: CustomCategory)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCustomCategoryRef(ref: ExerciseCustomCategoryCrossRef)
+
+    @Query("DELETE FROM exercise_custom_categories WHERE exerciseId = :exerciseId")
+    suspend fun clearCustomCategoriesForExercise(exerciseId: Long)
+
+    // Count queries
+    @Query("SELECT COUNT(*) FROM exercises WHERE isArchived = 0")
+    suspend fun getActiveCount(): Int
+
+    @Query("SELECT COUNT(*) FROM exercises WHERE isFavorite = 1 AND isArchived = 0")
+    suspend fun getFavoriteCount(): Int
+}
+
