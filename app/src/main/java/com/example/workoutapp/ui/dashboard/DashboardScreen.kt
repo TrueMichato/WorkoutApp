@@ -63,7 +63,10 @@ fun DashboardScreen(
         }
     ) { paddingValues ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(paddingValues),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .testTag(TestTags.Dashboard.ContentList),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -323,7 +326,12 @@ private fun BalanceBaselineCard(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSecondaryContainer
             )
-            Button(onClick = onGenerateWorkout, modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = onGenerateWorkout,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(TestTags.Dashboard.GenerateWorkoutButton)
+            ) {
                 Text("Generate Workout")
             }
         }

@@ -36,13 +36,15 @@ fun ExercisesScreen(
     }
 
     Scaffold(
+        modifier = Modifier.testTag(TestTags.Exercises.Screen),
         topBar = {
             TopAppBar(
                 title = { Text("Exercise Library") },
                 actions = {
                     IconButton(
                         onClick = { csvPickerLauncher.launch(arrayOf("text/comma-separated-values", "text/csv", "text/plain", "*/*")) },
-                        enabled = !uiState.isImporting
+                        enabled = !uiState.isImporting,
+                        modifier = Modifier.testTag(TestTags.Exercises.ImportButton)
                     ) {
                         if (uiState.isImporting) {
                             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -50,7 +52,10 @@ fun ExercisesScreen(
                             Icon(Icons.Default.UploadFile, "Import CSV")
                         }
                     }
-                    IconButton(onClick = { showFilterSheet = true }) {
+                    IconButton(
+                        onClick = { showFilterSheet = true },
+                        modifier = Modifier.testTag(TestTags.Exercises.FilterButton)
+                    ) {
                         Icon(Icons.Default.FilterList, "Filter")
                     }
                 }
@@ -71,7 +76,6 @@ fun ExercisesScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .testTag(TestTags.Exercises.Screen)
         ) {
             // Search bar
             OutlinedTextField(
@@ -79,7 +83,8 @@ fun ExercisesScreen(
                 onValueChange = viewModel::onSearchQueryChange,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .testTag(TestTags.Exercises.SearchField),
                 placeholder = { Text("Search exercises...") },
                 leadingIcon = { Icon(Icons.Default.Search, null) },
                 trailingIcon = {

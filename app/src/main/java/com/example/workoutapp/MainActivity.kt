@@ -9,12 +9,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.workoutapp.ui.navigation.Screen
 import com.example.workoutapp.ui.navigation.WorkoutNavHost
+import com.example.workoutapp.ui.test.TestTags
 import com.example.workoutapp.ui.theme.WorkoutAppTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -53,6 +55,7 @@ fun WorkoutAppMain() {
                         } == true
 
                         NavigationBarItem(
+                            modifier = Modifier.testTag(TestTags.BottomNav.item(screen.route)),
                             icon = {
                                 Icon(
                                     if (selected) screen.selectedIcon!! else screen.unselectedIcon!!,
