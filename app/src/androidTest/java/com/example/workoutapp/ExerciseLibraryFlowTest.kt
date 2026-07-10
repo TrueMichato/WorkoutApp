@@ -67,11 +67,11 @@ class ExerciseLibraryFlowTest {
     }
 
     @Test
-    fun archivedExercisePath_opensDetailWithRestoreAction() {
+    fun archivedExercisePath_opensDetailAndRestoresToActiveLibrary() {
         val exerciseName = "Archived UI Row ${System.currentTimeMillis()}"
         val exerciseId = runBlocking {
             val id = exerciseRepository.createExerciseWithRelations(
-                exercise = Exercise(name = exerciseName, description = "Archived for restore"),
+                exercise = Exercise(name = exerciseName, description = "Restore coverage"),
                 categories = emptyList(),
                 equipmentIds = emptyList(),
                 primaryMuscles = emptyList()
@@ -92,6 +92,20 @@ class ExerciseLibraryFlowTest {
         composeRule.onNodeWithText("Archived").assertIsDisplayed()
         composeRule.onNodeWithText(exerciseName).assertIsDisplayed()
         composeRule.onNodeWithContentDescription("More").performClick()
-        composeRule.onNodeWithText("Restore").assertIsDisplayed()
+        composeRule.onNodeWithText("Restore").assertIsDisplayed().performClick()
+
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            runBlocking { exerciseRepository.getExerciseById(exerciseId)?.isArchived == false }
+        }
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText("Archived").fetchSemanticsNodes().isEmpty()
+        }
+        composeRule.onNodeWithContentDescription("Back").performClick()
+        composeRule.onNodeWithTag(TestTags.Exercises.libraryFilter(ExerciseLibraryFilter.ACTIVE)).performClick()
+
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText(exerciseName).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText(exerciseName).assertIsDisplayed()
     }
 }
