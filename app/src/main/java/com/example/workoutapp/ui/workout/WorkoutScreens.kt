@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -67,6 +69,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -261,6 +264,10 @@ fun WorkoutGeneratorScreen(
 ) {
     val uiState by viewModel.generatorUiState.collectAsStateWithLifecycle()
     var showSavePlanDialog by remember { mutableStateOf(false) }
+    // Advanced/Customize starts collapsed so the defaults summary and primary action are both
+    // visible in the initial viewport. rememberSaveable keeps a user's choice to open it across
+    // configuration changes without them having to re-expand it every time.
+    var isAdvancedExpanded by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(uiState.generatedSessionId) {
         uiState.generatedSessionId?.let { sessionId ->
@@ -275,7 +282,10 @@ fun WorkoutGeneratorScreen(
         }
     }
 
+    val canDispatch = canDispatchGeneratorAction(uiState.isGenerating, uiState.isPreviewing, uiState.isSavingPlan)
+
     Scaffold(
+        modifier = Modifier.testTag(TestTags.WorkoutGenerator.Screen),
         topBar = {
             TopAppBar(
                 title = { Text("Generate Workout") },
@@ -285,6 +295,42 @@ fun WorkoutGeneratorScreen(
                     }
                 }
             )
+        },
+        bottomBar = {
+            // Single, pinned primary action: always reachable in the initial viewport and never
+            // duplicated elsewhere on the screen.
+            Surface(shadowElevation = 8.dp) {
+                Button(
+                    onClick = viewModel::generateWorkout,
+                    enabled = canDispatch,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .heightIn(min = 48.dp)
+                        .testTag(TestTags.WorkoutGenerator.PrimaryActionButton)
+                        .semantics {
+                            stateDescription = if (uiState.isGenerating) "Generating workout" else "Ready to generate"
+                        }
+                ) {
+                    if (uiState.isGenerating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    } else {
+                        Icon(Icons.Default.AutoAwesome, null)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        when {
+                            uiState.isGenerating -> "Building..."
+                            uiState.previewDraft != null -> "Start This Workout"
+                            else -> "Generate Workout"
+                        }
+                    )
+                }
+            }
         }
     ) { paddingValues ->
         if (uiState.isLoading) {
@@ -298,127 +344,15 @@ fun WorkoutGeneratorScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 item {
-                    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text("Smart generator", style = MaterialTheme.typography.titleLarge)
-                            Text(
-                                "Goal phase: ${uiState.currentPhase.displayName}. Auto mode uses goal weighting, undertrained-category protection, and spacing rules before it saves a session.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                item {
-                    Text("Location", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        uiState.locations.forEach { location ->
-                            FilterChip(
-                                selected = uiState.selectedLocationId == location.id,
-                                onClick = { viewModel.selectLocation(location.id) },
-                                label = { Text(location.name) },
-                                leadingIcon = { Icon(Icons.Default.LocationOn, null, modifier = Modifier.size(18.dp)) }
-                            )
-                        }
-                    }
-                }
-
-                item {
-                    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Duration", style = MaterialTheme.typography.titleMedium)
-                                Text("${uiState.durationMinutes} min", style = MaterialTheme.typography.titleMedium)
-                            }
-                            Slider(
-                                value = uiState.durationMinutes.toFloat(),
-                                onValueChange = { viewModel.updateDuration(it.toInt()) },
-                                valueRange = 15f..120f,
-                                steps = 20
-                            )
-                            Text(
-                                "Short sessions stay tighter and compound-focused. Longer sessions widen category coverage.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-
-                item {
-                    Text("Time slot", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        TimeSlot.entries.forEach { slot ->
-                            FilterChip(
-                                selected = uiState.selectedTimeSlot == slot,
-                                onClick = { viewModel.selectTimeSlot(slot) },
-                                label = { Text(slot.displayName) },
-                                leadingIcon = { Icon(Icons.Default.AccessTime, null, modifier = Modifier.size(18.dp)) }
-                            )
-                        }
-                    }
-                }
-
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Categories", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        if (uiState.selectedCategories.isNotEmpty()) {
-                            TextButton(onClick = viewModel::clearCategories) {
-                                Text("Clear")
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        WorkoutCategory.rotationCategories().forEach { category ->
-                            FilterChip(
-                                selected = category in uiState.selectedCategories,
-                                onClick = { viewModel.toggleCategory(category) },
-                                label = { Text(category.displayName) },
-                                leadingIcon = { Icon(category.icon, null, modifier = Modifier.size(18.dp)) }
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        if (uiState.selectedCategories.isEmpty()) {
-                            "Auto mode can pull in an undertrained category even if it is not your highest-weight focus, so nothing gets forgotten."
-                        } else {
-                            "Selected categories stay in focus, while the generator still spaces repeated stress and avoids same-category clustering."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    GeneratorSummaryCard(
+                        uiState = uiState,
+                        isAdvancedExpanded = isAdvancedExpanded,
+                        onToggleAdvanced = { isAdvancedExpanded = !isAdvancedExpanded }
                     )
+                }
+
+                if (isAdvancedExpanded) {
+                    generatorAdvancedSetupSection(uiState = uiState, viewModel = viewModel)
                 }
 
                 uiState.previewDraft?.let { draft ->
@@ -432,7 +366,9 @@ fun WorkoutGeneratorScreen(
                             onReject = viewModel::rejectPreviewExercise,
                             onSwap = viewModel::swapPreviewExercise,
                             onReset = viewModel::resetPreviewChanges,
-                            onSaveAsPlan = { showSavePlanDialog = true }
+                            onSaveAsPlan = { showSavePlanDialog = true },
+                            onEditSetup = { isAdvancedExpanded = true },
+                            onRegenerate = viewModel::previewWorkout
                         )
                     }
                 }
@@ -466,59 +402,18 @@ fun WorkoutGeneratorScreen(
 
                 uiState.error?.let { error ->
                     item {
-                        Surface(
-                            color = MaterialTheme.colorScheme.errorContainer,
-                            shape = MaterialTheme.shapes.medium,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                error,
-                                modifier = Modifier.padding(16.dp),
-                                color = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                        }
+                        GeneratorErrorCard(
+                            message = error,
+                            onRetry = viewModel::retryLastGeneratorAction,
+                            onDismiss = viewModel::clearGeneratorError
+                        )
                     }
                 }
 
                 item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = viewModel::previewWorkout,
-                            enabled = !uiState.isPreviewing && !uiState.isGenerating,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            if (uiState.isPreviewing) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Icon(Icons.Default.AccessTime, null)
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(if (uiState.previewDraft == null) "Preview" else "Refresh Preview")
-                        }
-                        Button(
-                            onClick = viewModel::generateWorkout,
-                            modifier = Modifier.weight(1f),
-                            enabled = !uiState.isGenerating && !uiState.isPreviewing
-                        ) {
-                            if (uiState.isGenerating) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
-                            } else {
-                                Icon(Icons.Default.AutoAwesome, null)
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(if (uiState.isGenerating) "Building..." else "Generate Workout")
-                        }
-                    }
+                    // Spacer so the last content item never sits flush against the pinned
+                    // bottom action bar.
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
             }
         }
@@ -537,6 +432,271 @@ fun WorkoutGeneratorScreen(
     }
 }
 
+/**
+ * Default-first summary: an honest recap of the settings that will be used if the user just taps
+ * Generate, plus the toggle into the Advanced/Customize section. Never claims settings are
+ * personalized unless [WorkoutGeneratorUiState.hasSavedProfile] is true.
+ */
+@Composable
+private fun GeneratorSummaryCard(
+    uiState: WorkoutGeneratorUiState,
+    isAdvancedExpanded: Boolean,
+    onToggleAdvanced: () -> Unit
+) {
+    val locationName = uiState.locations.firstOrNull { it.id == uiState.selectedLocationId }?.name
+    val summary = buildGeneratorSetupSummary(
+        hasSavedProfile = uiState.hasSavedProfile,
+        durationMinutes = uiState.durationMinutes,
+        locationName = locationName,
+        phase = uiState.currentPhase,
+        selectedCategories = uiState.selectedCategories
+    )
+
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(TestTags.WorkoutGenerator.SummaryCard)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Ready when you are", style = MaterialTheme.typography.titleLarge)
+            Text(
+                summary.detailLine,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                summary.defaultsExplanation,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TextButton(
+                onClick = onToggleAdvanced,
+                modifier = Modifier
+                    .align(Alignment.End)
+                    .heightIn(min = 48.dp)
+                    .testTag(TestTags.WorkoutGenerator.AdvancedToggle)
+                    .semantics {
+                        stateDescription = if (isAdvancedExpanded) "Expanded" else "Collapsed"
+                    }
+            ) {
+                Icon(
+                    if (isAdvancedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(if (isAdvancedExpanded) "Hide customize options" else "Customize (location, duration, focus)")
+            }
+        }
+    }
+}
+
+/**
+ * Progressive-disclosure section holding all pre-existing setup controls (location, duration,
+ * time slot, categories) plus the "Preview" and "Reset to defaults" secondary actions. Emitted
+ * only while the Advanced/Customize toggle is expanded; the controls themselves keep their
+ * existing selection state in the ViewModel so collapsing/reopening never loses a choice.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+private fun LazyListScope.generatorAdvancedSetupSection(
+    uiState: WorkoutGeneratorUiState,
+    viewModel: WorkoutViewModel
+) {
+    item {
+        Text("Location", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(8.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            uiState.locations.forEach { location ->
+                FilterChip(
+                    selected = uiState.selectedLocationId == location.id,
+                    onClick = { viewModel.selectLocation(location.id) },
+                    label = { Text(location.name) },
+                    leadingIcon = { Icon(Icons.Default.LocationOn, null, modifier = Modifier.size(18.dp)) },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                )
+            }
+        }
+    }
+
+    item {
+        OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Duration", style = MaterialTheme.typography.titleMedium)
+                    Text("${uiState.durationMinutes} min", style = MaterialTheme.typography.titleMedium)
+                }
+                Slider(
+                    value = uiState.durationMinutes.toFloat(),
+                    onValueChange = { viewModel.updateDuration(it.toInt()) },
+                    valueRange = 15f..120f,
+                    steps = 20,
+                    modifier = Modifier.heightIn(min = 48.dp)
+                )
+                Text(
+                    "Short sessions stay tighter and compound-focused. Longer sessions widen category coverage.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+
+    item {
+        Text("Time slot", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(8.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            TimeSlot.entries.forEach { slot ->
+                FilterChip(
+                    selected = uiState.selectedTimeSlot == slot,
+                    onClick = { viewModel.selectTimeSlot(slot) },
+                    label = { Text(slot.displayName) },
+                    leadingIcon = { Icon(Icons.Default.AccessTime, null, modifier = Modifier.size(18.dp)) },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                )
+            }
+        }
+    }
+
+    item {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Categories", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            if (uiState.selectedCategories.isNotEmpty()) {
+                TextButton(onClick = viewModel::clearCategories, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text("Clear")
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            WorkoutCategory.rotationCategories().forEach { category ->
+                FilterChip(
+                    selected = category in uiState.selectedCategories,
+                    onClick = { viewModel.toggleCategory(category) },
+                    label = { Text(category.displayName) },
+                    leadingIcon = { Icon(category.icon, null, modifier = Modifier.size(18.dp)) },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            if (uiState.selectedCategories.isEmpty()) {
+                "Auto mode can pull in an undertrained category even if it is not your highest-weight focus, so nothing gets forgotten."
+            } else {
+                "Selected categories stay in focus, while the generator still spaces repeated stress and avoids same-category clustering."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+
+    item {
+        val canDispatch = canDispatchGeneratorAction(uiState.isGenerating, uiState.isPreviewing, uiState.isSavingPlan)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Only offered before a preview exists; once it does, "Regenerate" on the preview
+            // card itself takes over this role so there is never more than one refresh CTA
+            // visible at a time.
+            if (uiState.previewDraft == null) {
+                OutlinedButton(
+                    onClick = viewModel::previewWorkout,
+                    enabled = canDispatch,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .testTag(TestTags.WorkoutGenerator.PreviewButton)
+                ) {
+                    if (uiState.isPreviewing) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.AccessTime, null)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Preview")
+                }
+            }
+            TextButton(
+                onClick = viewModel::resetGeneratorSetup,
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .testTag(TestTags.WorkoutGenerator.ResetDefaultsButton)
+            ) {
+                Text("Reset to defaults")
+            }
+        }
+    }
+}
+
+@Composable
+private fun GeneratorErrorCard(
+    message: String,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(message, color = MaterialTheme.colorScheme.onErrorContainer)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(
+                    onClick = onRetry,
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag(TestTags.WorkoutGenerator.ErrorRetryButton)
+                ) {
+                    Text("Try again")
+                }
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag(TestTags.WorkoutGenerator.ErrorDismissButton)
+                ) {
+                    Text("Dismiss")
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun WorkoutPreviewCard(
@@ -548,9 +708,15 @@ private fun WorkoutPreviewCard(
     onReject: (PlannedExerciseSummary) -> Unit,
     onSwap: (PlannedExerciseSummary) -> Unit,
     onReset: () -> Unit,
-    onSaveAsPlan: () -> Unit
+    onSaveAsPlan: () -> Unit,
+    onEditSetup: () -> Unit,
+    onRegenerate: () -> Unit
 ) {
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(TestTags.WorkoutGenerator.PreviewCard)
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -567,11 +733,43 @@ private fun WorkoutPreviewCard(
                     Text(draft.session.name, style = MaterialTheme.typography.titleMedium)
                 }
                 if (hasCustomizations) {
-                    TextButton(onClick = onReset, enabled = !isBusy) {
+                    TextButton(onClick = onReset, enabled = !isBusy, modifier = Modifier.heightIn(min = 48.dp)) {
                         Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Reset")
                     }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onEditSetup,
+                    enabled = !isBusy,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .testTag(TestTags.WorkoutGenerator.EditSetupButton)
+                ) {
+                    Icon(Icons.Default.Tune, null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Edit setup")
+                }
+                OutlinedButton(
+                    onClick = onRegenerate,
+                    enabled = !isBusy,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                ) {
+                    if (isBusy) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(16.dp))
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Regenerate")
                 }
             }
             Text(
@@ -590,7 +788,8 @@ private fun WorkoutPreviewCard(
                 )
                 OutlinedButton(
                     onClick = onSaveAsPlan,
-                    enabled = !isBusy && !isSavingPlan
+                    enabled = !isBusy && !isSavingPlan,
+                    modifier = Modifier.heightIn(min = 48.dp)
                 ) {
                     if (isSavingPlan) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
