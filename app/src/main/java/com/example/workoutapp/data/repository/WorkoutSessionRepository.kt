@@ -4,6 +4,7 @@ import com.example.workoutapp.data.local.dao.WorkoutSessionDao
 import com.example.workoutapp.data.local.dao.WorkoutPlanTemplateDao
 import com.example.workoutapp.data.model.*
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import java.util.Calendar
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -132,9 +133,10 @@ class WorkoutSessionRepository @Inject constructor(
         sessionDao.getSetLogsForExerciseSync(sessionExerciseId)
 
     // Statistics
-    suspend fun getCompletedSessionCount(): Int = sessionDao.getCompletedSessionCount()
+    fun getCompletedSessionCount(): Flow<Int> = sessionDao.getCompletedSessionCount()
 
-    suspend fun getTotalTrainingMinutes(): Int = sessionDao.getTotalTrainingMinutes() ?: 0
+    fun getTotalTrainingMinutes(): Flow<Int> =
+        sessionDao.getTotalTrainingMinutes().map { it ?: 0 }
 
     suspend fun getSessionCountInRange(startDate: Long, endDate: Long): Int =
         sessionDao.getSessionCountInRange(startDate, endDate)
@@ -219,10 +221,9 @@ class WorkoutSessionRepository @Inject constructor(
         session: WorkoutSession,
         exerciseConfigs: List<SessionExerciseConfig>
     ): Long {
-        val sessionId = sessionDao.insert(session)
         val sessionExercises = exerciseConfigs.mapIndexed { index, config ->
             SessionExercise(
-                sessionId = sessionId,
+                sessionId = 0,
                 exerciseId = config.exerciseId,
                 orderIndex = index,
                 section = config.section,
@@ -233,8 +234,7 @@ class WorkoutSessionRepository @Inject constructor(
                 notes = config.notes
             )
         }
-        sessionDao.insertSessionExercises(sessionExercises)
-        return sessionId
+        return sessionDao.insertWithExercises(session, sessionExercises)
     }
 }
 
@@ -250,4 +250,3 @@ data class SessionExerciseConfig(
     val prescriptionJson: String = "",
     val notes: String = ""
 )
-

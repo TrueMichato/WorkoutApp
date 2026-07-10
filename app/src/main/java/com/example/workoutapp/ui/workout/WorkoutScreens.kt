@@ -70,6 +70,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.workoutapp.data.model.SessionStatus
 import com.example.workoutapp.data.model.SetLog
 import com.example.workoutapp.data.model.TimeSlot
@@ -99,8 +100,8 @@ fun WorkoutScreen(
     onNavigateToEditPlan: (Long) -> Unit,
     viewModel: WorkoutViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.overviewUiState.collectAsState()
-    val generatorUiState by viewModel.generatorUiState.collectAsState()
+    val uiState by viewModel.overviewUiState.collectAsStateWithLifecycle()
+    val generatorUiState by viewModel.generatorUiState.collectAsStateWithLifecycle()
 
     LaunchedEffect(generatorUiState.generatedSessionId) {
         generatorUiState.generatedSessionId?.let { sessionId ->
@@ -242,7 +243,7 @@ fun WorkoutGeneratorScreen(
     onWorkoutGenerated: (Long) -> Unit,
     viewModel: WorkoutViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.generatorUiState.collectAsState()
+    val uiState by viewModel.generatorUiState.collectAsStateWithLifecycle()
     var showSavePlanDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.generatedSessionId) {
@@ -808,7 +809,7 @@ fun ActiveWorkoutScreen(
     onWorkoutCompleted: () -> Unit,
     viewModel: WorkoutViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.activeWorkoutUiState.collectAsState()
+    val uiState by viewModel.activeWorkoutUiState.collectAsStateWithLifecycle()
 
     LaunchedEffect(sessionId) {
         viewModel.loadActiveWorkout(sessionId)
@@ -938,7 +939,7 @@ fun WorkoutHistoryScreen(
     onNavigateBack: () -> Unit,
     viewModel: WorkoutViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.historyUiState.collectAsState()
+    val uiState by viewModel.historyUiState.collectAsStateWithLifecycle()
     val expandedIds = remember { mutableStateMapOf<Long, Boolean>() }
 
     Scaffold(

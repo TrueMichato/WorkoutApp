@@ -8,6 +8,8 @@ import com.example.workoutapp.domain.DashboardAnalytics
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.Calendar
+import java.util.TimeZone
 import javax.inject.Inject
 
 @HiltViewModel
@@ -22,22 +24,31 @@ class DashboardViewModel @Inject constructor(
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
 
     init {
-        loadDashboardData()
+        observeDashboardData()
     }
 
-    private fun loadDashboardData() {
+    private fun observeDashboardData() {
         // Exercise count
         viewModelScope.launch {
-            val exerciseCount = exerciseRepository.getActiveExerciseCount()
-            _uiState.update { state -> state.copy(exerciseCount = exerciseCount).withRecommendation() }
+            exerciseRepository.getActiveExerciseCount().collect { exerciseCount ->
+                _uiState.update { state -> state.copy(exerciseCount = exerciseCount).withRecommendation() }
+            }
         }
 
         // Completed workouts + total minutes
         viewModelScope.launch {
-            val completedCount = sessionRepository.getCompletedSessionCount()
-            val totalMinutes = sessionRepository.getTotalTrainingMinutes()
-            _uiState.update {
-                it.copy(completedWorkouts = completedCount, totalTrainingMinutes = totalMinutes).withRecommendation()
+            combine(
+                sessionRepository.getCompletedSessionCount(),
+                sessionRepository.getTotalTrainingMinutes()
+            ) { completedCount, totalMinutes ->
+                completedCount to totalMinutes
+            }.collect { (completedCount, totalMinutes) ->
+                _uiState.update {
+                    it.copy(
+                        completedWorkouts = completedCount,
+                        totalTrainingMinutes = totalMinutes
+                    ).withRecommendation()
+                }
             }
         }
 
@@ -106,26 +117,42 @@ class DashboardViewModel @Inject constructor(
 
         // This-week summary
         viewModelScope.launch {
-            sessionRepository.getSessionsForToday().collect { _ ->
-                val stats = _uiState.value.categoryStatsList
-                val trainedThisWeek = stats.filter {
-                    it.daysSinceLastTrained <= 7
-                }.map { it.category }.toSet()
-
-                sessionRepository.getRecentCompletedSessions(50).collect { sessions ->
-                    val now = System.currentTimeMillis()
-                    val weekAgo = now - 7 * 24 * 3600_000L
-                    val thisWeekSessions = sessions.filter { (it.completedAt ?: 0L) >= weekAgo }
-                    val summary = DashboardAnalytics.thisWeekSummary(thisWeekSessions, trainedThisWeek)
-                    _uiState.update { it.copy(thisWeekSummary = summary).withRecommendation() }
+            combine(
+                userGoalRepository.getAllCategoryStats(),
+                sessionRepository.getAllSessions()
+            ) { stats, sessions ->
+                val (weekStart, weekEnd) = currentWeekBounds(System.currentTimeMillis())
+                val trainedThisWeek = stats
+                    .filter { (it.lastTrainedAt ?: Long.MIN_VALUE) in weekStart until weekEnd }
+                    .map { it.category }
+                    .toSet()
+                val thisWeekSessions = sessions.filter {
+                    (it.completedAt ?: Long.MIN_VALUE) in weekStart until weekEnd
                 }
+                DashboardAnalytics.thisWeekSummary(thisWeekSessions, trainedThisWeek)
+            }.collect { summary ->
+                _uiState.update { it.copy(thisWeekSummary = summary).withRecommendation() }
             }
         }
     }
+}
 
-    fun refresh() {
-        loadDashboardData()
+internal fun currentWeekBounds(
+    now: Long,
+    timeZone: TimeZone = TimeZone.getDefault()
+): Pair<Long, Long> {
+    val calendar = Calendar.getInstance(timeZone).apply {
+        timeInMillis = now
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+        val daysSinceMonday = (get(Calendar.DAY_OF_WEEK) - Calendar.MONDAY + 7) % 7
+        add(Calendar.DAY_OF_MONTH, -daysSinceMonday)
     }
+    val weekStart = calendar.timeInMillis
+    calendar.add(Calendar.DAY_OF_MONTH, 7)
+    return weekStart to calendar.timeInMillis
 }
 
 private fun DashboardUiState.withRecommendation(): DashboardUiState = copy(

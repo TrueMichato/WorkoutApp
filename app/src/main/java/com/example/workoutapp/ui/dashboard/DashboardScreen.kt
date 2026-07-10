@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.workoutapp.data.model.WorkoutSession
 import com.example.workoutapp.domain.DashboardAnalytics
 import java.text.SimpleDateFormat
@@ -33,7 +34,7 @@ fun DashboardScreen(
     onNavigateToActiveWorkout: (Long) -> Unit,
     viewModel: DashboardViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {

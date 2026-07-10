@@ -15,7 +15,7 @@ interface ExerciseDao {
     suspend fun insertAll(exercises: List<Exercise>): List<Long>
 
     @Update
-    suspend fun update(exercise: Exercise)
+    suspend fun update(exercise: Exercise): Int
 
     @Delete
     suspend fun delete(exercise: Exercise)
@@ -164,9 +164,62 @@ interface ExerciseDao {
 
     // Count queries
     @Query("SELECT COUNT(*) FROM exercises WHERE isArchived = 0")
-    suspend fun getActiveCount(): Int
+    fun getActiveCount(): Flow<Int>
 
     @Query("SELECT COUNT(*) FROM exercises WHERE isFavorite = 1 AND isArchived = 0")
     suspend fun getFavoriteCount(): Int
-}
 
+    @Transaction
+    suspend fun insertWithRelations(
+        exercise: Exercise,
+        categories: List<WorkoutCategory>,
+        equipmentIds: List<Long>,
+        primaryMuscles: List<MuscleGroup>,
+        secondaryMuscles: List<MuscleGroup>
+    ): Long {
+        require(exercise.id == 0L) { "New exercises cannot already have an id." }
+        val exerciseId = insert(exercise)
+        replaceRelations(exerciseId, categories, equipmentIds, primaryMuscles, secondaryMuscles)
+        return exerciseId
+    }
+
+    @Transaction
+    suspend fun updateWithRelations(
+        exercise: Exercise,
+        categories: List<WorkoutCategory>,
+        equipmentIds: List<Long>,
+        primaryMuscles: List<MuscleGroup>,
+        secondaryMuscles: List<MuscleGroup>
+    ) {
+        require(exercise.id != 0L) { "Exercise id is required for updates." }
+        check(update(exercise) == 1) { "Exercise ${exercise.id} no longer exists." }
+        replaceRelations(exercise.id, categories, equipmentIds, primaryMuscles, secondaryMuscles)
+    }
+
+    private suspend fun replaceRelations(
+        exerciseId: Long,
+        categories: List<WorkoutCategory>,
+        equipmentIds: List<Long>,
+        primaryMuscles: List<MuscleGroup>,
+        secondaryMuscles: List<MuscleGroup>
+    ) {
+        clearCategoriesForExercise(exerciseId)
+        clearEquipmentForExercise(exerciseId)
+        clearMusclesForExercise(exerciseId)
+
+        if (categories.isNotEmpty()) {
+            insertCategoryRefs(categories.map { ExerciseCategoryCrossRef(exerciseId, it) })
+        }
+        if (equipmentIds.isNotEmpty()) {
+            insertEquipmentRefs(equipmentIds.distinct().map { ExerciseEquipmentCrossRef(exerciseId, it) })
+        }
+        val muscleRefs = primaryMuscles.distinct().map {
+            ExerciseMuscleCrossRef(exerciseId, it, isPrimary = true)
+        } + secondaryMuscles.distinct().filterNot { it in primaryMuscles }.map {
+            ExerciseMuscleCrossRef(exerciseId, it, isPrimary = false)
+        }
+        if (muscleRefs.isNotEmpty()) {
+            insertMuscleRefs(muscleRefs)
+        }
+    }
+}

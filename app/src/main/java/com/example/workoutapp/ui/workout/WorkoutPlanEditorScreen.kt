@@ -57,6 +57,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.workoutapp.data.model.Exercise
 import com.example.workoutapp.data.model.PlanExerciseSection
 import com.example.workoutapp.data.model.TimeSlot
@@ -74,7 +75,7 @@ fun WorkoutPlanEditorScreen(
     onNavigateToActiveWorkout: (Long) -> Unit,
     viewModel: WorkoutViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.planEditorUiState.collectAsState()
+    val uiState by viewModel.planEditorUiState.collectAsStateWithLifecycle()
     var showAddExerciseDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
 
@@ -691,7 +692,6 @@ private fun AddExerciseToPlanDialog(
         }
     )
 }
-
 
 
 

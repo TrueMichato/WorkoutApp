@@ -138,15 +138,28 @@ interface WorkoutSessionDao {
 
     // Statistics
     @Query("SELECT COUNT(*) FROM workout_sessions WHERE status = 'COMPLETED'")
-    suspend fun getCompletedSessionCount(): Int
+    fun getCompletedSessionCount(): Flow<Int>
 
     @Query("SELECT SUM(actualDurationMinutes) FROM workout_sessions WHERE status = 'COMPLETED'")
-    suspend fun getTotalTrainingMinutes(): Int?
+    fun getTotalTrainingMinutes(): Flow<Int?>
 
     @Query("""
         SELECT COUNT(*) FROM workout_sessions 
         WHERE status = 'COMPLETED' AND completedAt >= :startDate AND completedAt < :endDate
     """)
     suspend fun getSessionCountInRange(startDate: Long, endDate: Long): Int
-}
 
+    @Transaction
+    suspend fun insertWithExercises(
+        session: WorkoutSession,
+        exercises: List<SessionExercise>
+    ): Long {
+        require(session.id == 0L) { "New workout sessions cannot already have an id." }
+        require(exercises.isNotEmpty()) { "A workout session must contain at least one exercise." }
+        val sessionId = insert(session)
+        insertSessionExercises(exercises.mapIndexed { index, exercise ->
+            exercise.copy(id = 0, sessionId = sessionId, orderIndex = index)
+        })
+        return sessionId
+    }
+}

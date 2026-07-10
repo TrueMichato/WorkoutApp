@@ -3,6 +3,7 @@ package com.example.workoutapp.data.local
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.core.net.toUri
 import com.example.workoutapp.data.model.Exercise
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -111,7 +112,7 @@ class MediaStorageManager @Inject constructor(
         return try {
             val list = json.decodeFromString<List<String>>(jsonArray)
             list.mapNotNull { s ->
-                try { Uri.parse(s) } catch (_: Exception) { null }
+                try { s.toUri() } catch (_: Exception) { null }
             }
         } catch (_: Exception) {
             emptyList()

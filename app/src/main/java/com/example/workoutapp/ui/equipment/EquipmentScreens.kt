@@ -54,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.workoutapp.data.model.Equipment
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -63,7 +64,7 @@ fun EquipmentManagementScreen(
     onNavigateToLocation: (Long) -> Unit,
     viewModel: EquipmentViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var selectedTab by remember { mutableIntStateOf(0) }
     var showAddLocationDialog by remember { mutableStateOf(false) }
     var showAddEquipmentDialog by remember { mutableStateOf(false) }
@@ -303,7 +304,7 @@ fun LocationDetailScreen(
     onNavigateBack: () -> Unit,
     viewModel: EquipmentViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.locationDetailState.collectAsState()
+    val uiState by viewModel.locationDetailState.collectAsStateWithLifecycle()
 
     LaunchedEffect(locationId) {
         viewModel.loadLocation(locationId)

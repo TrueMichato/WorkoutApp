@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.workoutapp.data.model.Exercise
 import com.example.workoutapp.data.model.WorkoutCategory
 
@@ -24,7 +25,7 @@ fun ExercisesScreen(
     onNavigateToAddExercise: () -> Unit,
     viewModel: ExercisesViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showFilterSheet by remember { mutableStateOf(false) }
     val csvPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -340,4 +341,3 @@ private fun FlowRow(
         content = { content() }
     )
 }
-
