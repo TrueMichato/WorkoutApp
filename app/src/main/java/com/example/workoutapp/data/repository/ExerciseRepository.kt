@@ -17,13 +17,17 @@ class ExerciseRepository @Inject constructor(
         check(exerciseDao.update(exercise) == 1) { "Exercise ${exercise.id} no longer exists." }
     }
 
-    suspend fun deleteExercise(exercise: Exercise) = exerciseDao.delete(exercise)
+    suspend fun hardDeleteExerciseIfUnreferenced(exerciseId: Long) {
+        exerciseDao.hardDeleteIfUnreferenced(exerciseId)
+    }
 
     suspend fun getExerciseById(id: Long): Exercise? = exerciseDao.getById(id)
 
     fun getExerciseByIdFlow(id: Long): Flow<Exercise?> = exerciseDao.getByIdFlow(id)
 
     fun getAllExercises(): Flow<List<Exercise>> = exerciseDao.getAllActive()
+
+    fun getAllExercisesIncludingArchived(): Flow<List<Exercise>> = exerciseDao.getAll()
 
     fun getFavoriteExercises(): Flow<List<Exercise>> = exerciseDao.getFavorites()
 
@@ -56,9 +60,13 @@ class ExerciseRepository @Inject constructor(
     suspend fun setFavorite(exerciseId: Long, isFavorite: Boolean) =
         exerciseDao.setFavorite(exerciseId, isFavorite)
 
-    suspend fun archiveExercise(exerciseId: Long) = exerciseDao.setArchived(exerciseId, true)
+    suspend fun archiveExercise(exerciseId: Long) {
+        check(exerciseDao.setArchived(exerciseId, true) == 1) { "Exercise $exerciseId no longer exists." }
+    }
 
-    suspend fun unarchiveExercise(exerciseId: Long) = exerciseDao.setArchived(exerciseId, false)
+    suspend fun unarchiveExercise(exerciseId: Long) {
+        check(exerciseDao.setArchived(exerciseId, false) == 1) { "Exercise $exerciseId no longer exists." }
+    }
 
     // Categories
     suspend fun setExerciseCategories(exerciseId: Long, categories: List<WorkoutCategory>) {

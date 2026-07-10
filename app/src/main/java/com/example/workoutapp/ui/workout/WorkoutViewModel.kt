@@ -190,7 +190,7 @@ class WorkoutViewModel @Inject constructor(
             combine(
                 sessionRepository.getSessionByIdFlow(sessionId),
                 sessionRepository.getExercisesForSession(sessionId),
-                exerciseRepository.getAllExercises(),
+                exerciseRepository.getAllExercisesIncludingArchived(),
                 _completionInput, _isCompletingWorkout, _completedWorkoutId,
                 _setEntryDrafts, _activeRefreshTick
             ) { values ->
@@ -229,7 +229,7 @@ class WorkoutViewModel @Inject constructor(
     // ========== History (with summaries + filter) ==========
     val historyUiState: StateFlow<WorkoutHistoryUiState> = combine(
         sessionRepository.getAllSessions(),
-        exerciseRepository.getAllExercises(),
+        exerciseRepository.getAllExercisesIncludingArchived(),
         _historyStatusFilter
     ) { sessions, exerciseLibrary, statusFilter ->
         val exerciseById = exerciseLibrary.associateBy { it.id }
@@ -285,7 +285,7 @@ class WorkoutViewModel @Inject constructor(
                 val template = sessionRepository.getPlanTemplateById(templateId)
                     ?: error("Workout plan not found.")
                 val templateExercises = sessionRepository.getExercisesForPlanTemplate(templateId)
-                val exerciseById = _planEditorUiState.value.availableExercises.associateBy { it.id }
+                val exerciseById = exerciseRepository.getAllExercisesIncludingArchived().first().associateBy { it.id }
                 _planEditorUiState.update {
                     it.copy(
                         templateId = template.id,
@@ -742,13 +742,14 @@ class WorkoutViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            exerciseRepository.getAllExercises().collect { exercises ->
-                val sorted = exercises.sortedBy { it.name.lowercase() }
+            exerciseRepository.getAllExercisesIncludingArchived().collect { exercises ->
+                val activeSorted = exercises.filterNot { it.isArchived }.sortedBy { it.name.lowercase() }
+                val exerciseById = exercises.associateBy { it.id }
                 _planEditorUiState.update { state ->
                     state.copy(
-                        availableExercises = sorted,
+                        availableExercises = activeSorted,
                         selectedExercises = state.selectedExercises.map { item ->
-                            item.copy(exerciseName = sorted.firstOrNull { it.id == item.exerciseId }?.name ?: item.exerciseName)
+                            item.copy(exerciseName = exerciseById[item.exerciseId]?.name ?: item.exerciseName)
                         }
                     )
                 }
@@ -1008,4 +1009,3 @@ private fun resolveEditorSetCount(setsText: String, fallback: Int): Int {
         else -> ((numbers.first() + numbers.last()) / 2).coerceIn(1, 20)
     }
 }
-

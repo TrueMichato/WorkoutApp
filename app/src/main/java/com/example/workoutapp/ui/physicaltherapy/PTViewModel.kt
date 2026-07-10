@@ -67,7 +67,7 @@ class PTViewModel @Inject constructor(
         combine(
             ptRepository.getRoutineByIdFlow(routineId),
             ptRepository.getExercisesForRoutineFlow(routineId),
-            exerciseRepository.getAllExercises(),
+            exerciseRepository.getAllExercisesIncludingArchived(),
             ptRepository.getLogsForRoutine(routineId),
             _activeSessionLogId,
             _sessionFeedback
@@ -383,7 +383,6 @@ data class PTEditUiState(
     val availableExercises: List<Exercise> = emptyList(),
     val isLoading: Boolean = false
 )
-
 
 
 
