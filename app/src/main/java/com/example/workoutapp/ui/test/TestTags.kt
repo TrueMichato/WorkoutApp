@@ -5,6 +5,12 @@ import com.example.workoutapp.data.model.TrainingPhase
 import com.example.workoutapp.data.model.WorkoutCategory
 
 object TestTags {
+    object Dashboard {
+        const val Screen = "dashboard_screen"
+        const val BalanceBaselineCard = "dashboard_balance_baseline_card"
+        const val BalanceScoreCard = "dashboard_balance_score_card"
+    }
+
     object Exercises {
         const val Screen = "exercises_screen"
         const val SearchField = "exercises_search_field"
