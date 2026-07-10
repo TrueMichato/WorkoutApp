@@ -18,10 +18,10 @@ interface ExerciseDao {
     suspend fun update(exercise: Exercise): Int
 
     @Delete
-    suspend fun delete(exercise: Exercise)
+    suspend fun delete(exercise: Exercise): Int
 
     @Query("DELETE FROM exercises WHERE id = :exerciseId")
-    suspend fun deleteById(exerciseId: Long)
+    suspend fun deleteById(exerciseId: Long): Int
 
     // Queries
     @Query("SELECT * FROM exercises WHERE id = :id")
@@ -78,7 +78,29 @@ interface ExerciseDao {
     suspend fun setFavorite(exerciseId: Long, isFavorite: Boolean, timestamp: Long = System.currentTimeMillis())
 
     @Query("UPDATE exercises SET isArchived = :isArchived, updatedAt = :timestamp WHERE id = :exerciseId")
-    suspend fun setArchived(exerciseId: Long, isArchived: Boolean, timestamp: Long = System.currentTimeMillis())
+    suspend fun setArchived(exerciseId: Long, isArchived: Boolean, timestamp: Long = System.currentTimeMillis()): Int
+
+    @Query("""
+        SELECT
+            (SELECT COUNT(*) FROM session_exercises WHERE exerciseId = :exerciseId) +
+            (SELECT COUNT(*) FROM workout_plan_template_exercises WHERE exerciseId = :exerciseId) +
+            (SELECT COUNT(*) FROM pt_routine_exercises WHERE exerciseId = :exerciseId) +
+            (SELECT COUNT(*) FROM ml_feedback_events WHERE exerciseId = :exerciseId)
+    """)
+    suspend fun getReferenceCount(exerciseId: Long): Int
+
+    @Transaction
+    suspend fun hardDeleteIfUnreferenced(exerciseId: Long) {
+        val referenceCount = getReferenceCount(exerciseId)
+        check(referenceCount == 0) {
+            "Cannot permanently delete an exercise used by workout history, saved plans, PT routines, or feedback."
+        }
+        clearCategoriesForExercise(exerciseId)
+        clearEquipmentForExercise(exerciseId)
+        clearMusclesForExercise(exerciseId)
+        clearCustomCategoriesForExercise(exerciseId)
+        check(deleteById(exerciseId) == 1) { "Exercise $exerciseId no longer exists." }
+    }
 
     // Category cross-references
     @Insert(onConflict = OnConflictStrategy.REPLACE)
