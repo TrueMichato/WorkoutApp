@@ -60,4 +60,21 @@ object TestTags {
         fun sectionChip(section: PlanExerciseSection): String =
             "workout_plan_editor_section_${section.name.lowercase()}"
     }
+
+    object ActiveWorkout {
+        const val Screen = "active_workout_screen"
+        const val CurrentExerciseCard = "active_workout_current_exercise_card"
+        const val DoneButton = "active_workout_done_button"
+        const val SkipButton = "active_workout_skip_button"
+        const val RepsField = "active_workout_reps_field"
+        const val WeightField = "active_workout_weight_field"
+        const val DurationField = "active_workout_duration_field"
+        const val RpeField = "active_workout_rpe_field"
+        const val NotesField = "active_workout_notes_field"
+        const val SaveSetButton = "active_workout_save_set_button"
+        const val RepeatLastSetButton = "active_workout_repeat_last_set_button"
+        const val CompleteWorkoutButton = "active_workout_complete_button"
+
+        fun upcomingRow(sessionExerciseId: Long): String = "active_workout_upcoming_row_$sessionExerciseId"
+    }
 }
