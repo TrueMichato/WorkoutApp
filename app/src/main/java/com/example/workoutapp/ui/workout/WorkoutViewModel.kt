@@ -14,6 +14,7 @@ import com.example.workoutapp.data.model.WeightUnit
 import com.example.workoutapp.data.model.PlanExerciseSection
 import com.example.workoutapp.data.model.RichPrescriptionData
 import com.example.workoutapp.data.model.WorkoutCategory
+import com.example.workoutapp.data.model.WorkoutCompletionSemantics
 import com.example.workoutapp.data.model.WorkoutPlanTemplate
 import com.example.workoutapp.data.model.WorkoutPlanTemplateExercise
 import com.example.workoutapp.data.model.WorkoutPlanTemplateSummary
@@ -85,6 +86,7 @@ class WorkoutViewModel @Inject constructor(
     private val _completionInput = MutableStateFlow(WorkoutCompletionInput())
     private val _isCompletingWorkout = MutableStateFlow(false)
     private val _completedWorkoutId = MutableStateFlow<Long?>(null)
+    private val _activeWorkoutError = MutableStateFlow<String?>(null)
     private val _setEntryDrafts = MutableStateFlow<Map<Long, SetEntryDraft>>(emptyMap())
     /** Bumped to force active-workout recomposition after set log / exercise status writes */
     private val _activeRefreshTick = MutableStateFlow(0)
@@ -191,7 +193,7 @@ class WorkoutViewModel @Inject constructor(
                 sessionRepository.getSessionByIdFlow(sessionId),
                 sessionRepository.getExercisesForSession(sessionId),
                 exerciseRepository.getAllExercisesIncludingArchived(),
-                _completionInput, _isCompletingWorkout, _completedWorkoutId,
+                _completionInput, _isCompletingWorkout, _completedWorkoutId, _activeWorkoutError,
                 _setEntryDrafts, _activeRefreshTick
             ) { values ->
                 @Suppress("UNCHECKED_CAST")
@@ -203,9 +205,10 @@ class WorkoutViewModel @Inject constructor(
                 val completionInput = values[3] as WorkoutCompletionInput
                 val isCompleting = values[4] as Boolean
                 val completedId = values[5] as Long?
+                val activeError = values[6] as String?
                 @Suppress("UNCHECKED_CAST")
-                val drafts = values[6] as Map<Long, SetEntryDraft>
-                // values[7] is refreshTick – only used to trigger recomposition
+                val drafts = values[7] as Map<Long, SetEntryDraft>
+                // values[8] is refreshTick – only used to trigger recomposition
 
                 val exerciseById = exerciseLibrary.associateBy { it.id }
                 val exercises = sessionExercises.map { se ->
@@ -220,7 +223,7 @@ class WorkoutViewModel @Inject constructor(
                 ActiveWorkoutUiState(
                     session = session, exercises = exercises,
                     completionInput = completionInput, isCompleting = isCompleting,
-                    completedWorkoutId = completedId, isLoading = false
+                    completedWorkoutId = completedId, error = activeError, isLoading = false
                 )
             }
         }
@@ -260,6 +263,7 @@ class WorkoutViewModel @Inject constructor(
     fun clearGeneratedSession() { _generatedSessionId.value = null }
     fun clearCompletedWorkout() { _completedWorkoutId.value = null }
     fun clearGeneratorError() { _generationError.value = null }
+    fun clearActiveWorkoutError() { _activeWorkoutError.value = null }
     fun clearPlanSaveMessage() { _planSaveMessage.value = null }
 
     fun initializeNewPlanEditor() {
@@ -555,7 +559,10 @@ class WorkoutViewModel @Inject constructor(
     // ========== Active workout actions ==========
     fun loadActiveWorkout(sessionId: Long) {
         if (_activeSessionId.value == sessionId) return
-        _activeSessionId.value = sessionId; _completedWorkoutId.value = null; _setEntryDrafts.value = emptyMap()
+        _activeSessionId.value = sessionId
+        _completedWorkoutId.value = null
+        _activeWorkoutError.value = null
+        _setEntryDrafts.value = emptyMap()
         viewModelScope.launch {
             sessionRepository.getSessionById(sessionId)?.let { session ->
                 _completionInput.value = WorkoutCompletionInput(
@@ -578,17 +585,25 @@ class WorkoutViewModel @Inject constructor(
 
     fun toggleExerciseCompleted(sessionExercise: SessionExercise, completed: Boolean) {
         viewModelScope.launch {
-            sessionRepository.markExerciseCompleted(sessionExercise.id, completed)
-            if (completed) sessionRepository.markExerciseSkipped(sessionExercise.id, false)
-            refreshActive()
+            try {
+                _activeWorkoutError.value = null
+                sessionRepository.markExerciseCompleted(sessionExercise.id, completed)
+                refreshActive()
+            } catch (e: Exception) {
+                _activeWorkoutError.value = e.message ?: "Failed to update exercise status."
+            }
         }
     }
 
     fun toggleExerciseSkipped(sessionExercise: SessionExercise, skipped: Boolean) {
         viewModelScope.launch {
-            sessionRepository.markExerciseSkipped(sessionExercise.id, skipped)
-            if (skipped) sessionRepository.markExerciseCompleted(sessionExercise.id, false)
-            refreshActive()
+            try {
+                _activeWorkoutError.value = null
+                sessionRepository.markExerciseSkipped(sessionExercise.id, skipped)
+                refreshActive()
+            } catch (e: Exception) {
+                _activeWorkoutError.value = e.message ?: "Failed to update exercise status."
+            }
         }
     }
 
@@ -601,39 +616,40 @@ class WorkoutViewModel @Inject constructor(
 
     fun saveSetLog(item: SessionExerciseUi) {
         viewModelScope.launch {
-            val draft = _setEntryDrafts.value[item.sessionExercise.id] ?: SetEntryDraft()
-            val nextSet = (item.setLogs.maxOfOrNull { it.setNumber } ?: 0) + 1
-            val richPrescription = item.sessionExercise.prescriptionJson.toRichPrescriptionDataOrNull()
-            val log = SetLog(
-                sessionExerciseId = item.sessionExercise.id,
-                setNumber = nextSet,
-                reps = draft.reps.toIntOrNull() ?: extractFirstInt(item.sessionExercise.plannedReps),
-                weight = draft.weight.toFloatOrNull(),
-                weightUnit = WeightUnit.KG,
-                durationSeconds = draft.durationSeconds.toIntOrNull() ?: richPrescription?.durationSeconds,
-                rpe = draft.rpe.toIntOrNull()?.coerceIn(1, 10),
-                restTakenSeconds = item.sessionExercise.plannedRestSeconds,
-                notes = draft.notes
-            )
-            sessionRepository.logSet(log)
-            // Auto-mark exercise completed when first set is logged
-            if (!item.sessionExercise.isCompleted) {
-                sessionRepository.markExerciseCompleted(item.sessionExercise.id, true)
-                sessionRepository.markExerciseSkipped(item.sessionExercise.id, false)
+            try {
+                _activeWorkoutError.value = null
+                val draft = _setEntryDrafts.value[item.sessionExercise.id] ?: SetEntryDraft()
+                val nextSet = (item.setLogs.maxOfOrNull { it.setNumber } ?: 0) + 1
+                val richPrescription = item.sessionExercise.prescriptionJson.toRichPrescriptionDataOrNull()
+                val log = SetLog(
+                    sessionExerciseId = item.sessionExercise.id,
+                    setNumber = nextSet,
+                    reps = draft.reps.toIntOrNull() ?: extractFirstInt(item.sessionExercise.plannedReps),
+                    weight = draft.weight.toFloatOrNull(),
+                    weightUnit = WeightUnit.KG,
+                    durationSeconds = draft.durationSeconds.toIntOrNull() ?: richPrescription?.durationSeconds,
+                    rpe = draft.rpe.toIntOrNull()?.coerceIn(1, 10),
+                    restTakenSeconds = item.sessionExercise.plannedRestSeconds,
+                    notes = draft.notes
+                )
+                sessionRepository.logSet(log)
+                _setEntryDrafts.value = _setEntryDrafts.value.toMutableMap().apply { remove(item.sessionExercise.id) }
+                refreshActive()
+            } catch (e: Exception) {
+                _activeWorkoutError.value = e.message ?: "Failed to save set."
             }
-            _setEntryDrafts.value = _setEntryDrafts.value.toMutableMap().apply { remove(item.sessionExercise.id) }
-            refreshActive()
         }
     }
 
-    fun deleteSetLog(item: SessionExerciseUi, setLog: SetLog) {
+    fun deleteSetLog(setLog: SetLog) {
         viewModelScope.launch {
-            sessionRepository.deleteSetLog(setLog)
-            val remaining = sessionRepository.getSetLogsForExerciseSync(item.sessionExercise.id)
-            if (remaining.isEmpty() && !item.sessionExercise.isSkipped) {
-                sessionRepository.markExerciseCompleted(item.sessionExercise.id, false)
+            try {
+                _activeWorkoutError.value = null
+                sessionRepository.deleteSetLog(setLog)
+                refreshActive()
+            } catch (e: Exception) {
+                _activeWorkoutError.value = e.message ?: "Failed to delete set."
             }
-            refreshActive()
         }
     }
 
@@ -647,12 +663,15 @@ class WorkoutViewModel @Inject constructor(
         val sid = _activeSessionId.value ?: return
         viewModelScope.launch {
             _isCompletingWorkout.value = true
+            _activeWorkoutError.value = null
             try {
-                val session = sessionRepository.getSessionById(sid) ?: return@launch
-                if (session.status == SessionStatus.PLANNED) sessionRepository.startSession(sid)
                 workoutPlanner.completeWorkout(sid, _completionInput.value)
                 _completedWorkoutId.value = sid
-            } finally { _isCompletingWorkout.value = false }
+            } catch (e: Exception) {
+                _activeWorkoutError.value = e.message ?: "Failed to complete workout."
+            } finally {
+                _isCompletingWorkout.value = false
+            }
         }
     }
 
@@ -911,12 +930,15 @@ data class SessionExerciseUi(
     val exercise: Exercise?,
     val setLogs: List<SetLog> = emptyList(),
     val draft: SetEntryDraft = SetEntryDraft()
-)
+) {
+    val completionState = WorkoutCompletionSemantics.exerciseState(sessionExercise, setLogs.size)
+}
 
 data class ActiveWorkoutUiState(
     val session: WorkoutSession? = null, val exercises: List<SessionExerciseUi> = emptyList(),
     val completionInput: WorkoutCompletionInput = WorkoutCompletionInput(),
-    val isCompleting: Boolean = false, val completedWorkoutId: Long? = null, val isLoading: Boolean = false
+    val isCompleting: Boolean = false, val completedWorkoutId: Long? = null,
+    val error: String? = null, val isLoading: Boolean = false
 )
 
 data class WorkoutHistoryUiState(

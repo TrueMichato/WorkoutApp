@@ -55,7 +55,9 @@ class ExerciseRepository @Inject constructor(
         exerciseDao.getByDifficulty(difficulty)
 
     // Tracking
-    suspend fun markExercisePerformed(exerciseId: Long) = exerciseDao.markPerformed(exerciseId)
+    suspend fun markExercisePerformed(exerciseId: Long) {
+        check(exerciseDao.markPerformed(exerciseId) == 1) { "Exercise $exerciseId no longer exists." }
+    }
 
     suspend fun setFavorite(exerciseId: Long, isFavorite: Boolean) =
         exerciseDao.setFavorite(exerciseId, isFavorite)
