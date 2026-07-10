@@ -59,7 +59,7 @@ class WorkoutPlanFlowTest {
         val exerciseName = "Planner Test Squat ${System.currentTimeMillis()}"
         val planName = "Leg Day ${System.currentTimeMillis()}"
 
-        runBlocking {
+        val exerciseId = runBlocking {
             exerciseRepository.createExerciseWithRelations(
                 exercise = Exercise(
                     name = exerciseName,
@@ -98,7 +98,7 @@ class WorkoutPlanFlowTest {
             .performScrollToNode(hasTestTag(TestTags.WorkoutPlanEditor.AddExerciseButton))
         composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.AddExerciseButton).performClick()
         composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.ExerciseSearchField).performTextInput(exerciseName)
-        composeRule.onNodeWithText(exerciseName).performClick()
+        composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.exerciseOption(exerciseId)).performClick()
         composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.ContentList)
             .performScrollToNode(hasTestTag(TestTags.WorkoutPlanEditor.SaveAndPlayButton))
         composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.SaveAndPlayButton).performClick()
@@ -113,4 +113,3 @@ class WorkoutPlanFlowTest {
         composeRule.onNodeWithText("RPE 8").assertIsDisplayed()
     }
 }
-

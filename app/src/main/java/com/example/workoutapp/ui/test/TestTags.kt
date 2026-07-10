@@ -55,6 +55,9 @@ object TestTags {
         const val SaveAndPlayButton = "workout_plan_editor_save_and_play"
         const val ExerciseSearchField = "workout_plan_editor_exercise_search"
 
+        fun exerciseOption(exerciseId: Long): String =
+            "workout_plan_editor_exercise_$exerciseId"
+
         fun sectionChip(section: PlanExerciseSection): String =
             "workout_plan_editor_section_${section.name.lowercase()}"
     }

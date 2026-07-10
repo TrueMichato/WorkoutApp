@@ -663,7 +663,12 @@ private fun AddExerciseToPlanDialog(
                 } else {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.height(320.dp)) {
                         items(available, key = { it.id }) { exercise ->
-                            OutlinedCard(onClick = { onSelectExercise(exercise.id) }, modifier = Modifier.fillMaxWidth()) {
+                            OutlinedCard(
+                                onClick = { onSelectExercise(exercise.id) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag(TestTags.WorkoutPlanEditor.exerciseOption(exercise.id))
+                            ) {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -711,4 +716,3 @@ private fun AddExerciseToPlanDialog(
         }
     )
 }
-
