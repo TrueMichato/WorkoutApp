@@ -1,5 +1,10 @@
 package com.example.workoutapp.data.repository
 
+import androidx.room.withTransaction
+import com.example.workoutapp.data.local.WorkoutDatabase
+import com.example.workoutapp.data.local.dao.ExerciseDao
+import com.example.workoutapp.data.local.dao.MLFeedbackDao
+import com.example.workoutapp.data.local.dao.UserGoalDao
 import com.example.workoutapp.data.local.dao.WorkoutSessionDao
 import com.example.workoutapp.data.local.dao.WorkoutPlanTemplateDao
 import com.example.workoutapp.data.model.*
@@ -8,11 +13,17 @@ import kotlinx.coroutines.flow.map
 import java.util.Calendar
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.max
+import kotlin.math.roundToInt
 
 @Singleton
 class WorkoutSessionRepository @Inject constructor(
+    private val database: WorkoutDatabase,
     private val sessionDao: WorkoutSessionDao,
-    private val templateDao: WorkoutPlanTemplateDao
+    private val templateDao: WorkoutPlanTemplateDao,
+    private val exerciseDao: ExerciseDao,
+    private val userGoalDao: UserGoalDao,
+    private val mlFeedbackDao: MLFeedbackDao
 ) {
     // Session CRUD
     suspend fun createSession(session: WorkoutSession): Long = sessionDao.insert(session)
@@ -88,6 +99,112 @@ class WorkoutSessionRepository @Inject constructor(
     suspend fun completeSession(sessionId: Long, durationMinutes: Int) =
         sessionDao.completeSession(sessionId, durationMinutes)
 
+    suspend fun completeWorkout(
+        sessionId: Long,
+        input: WorkoutSessionCompletionInput,
+        now: Long = System.currentTimeMillis()
+    ): WorkoutSessionCompletionResult = database.withTransaction {
+        val session = sessionDao.getById(sessionId)
+            ?: error("Workout session $sessionId no longer exists.")
+        val sessionExercises = sessionDao.getExercisesForSessionSync(sessionId)
+        val completedExercises = WorkoutCompletionSemantics.completedExercises(sessionExercises)
+        val skippedExercises = WorkoutCompletionSemantics.skippedExercises(sessionExercises)
+        val unfinishedExercises = WorkoutCompletionSemantics.unfinishedExercises(sessionExercises)
+
+        if (WorkoutCompletionSemantics.isFinalized(session.status)) {
+            return@withTransaction WorkoutSessionCompletionResult(
+                sessionId = sessionId,
+                status = session.status,
+                alreadyFinalized = true,
+                completedExerciseCount = completedExercises.size,
+                skippedExerciseCount = skippedExercises.size,
+                unfinishedExerciseCount = unfinishedExercises.size
+            )
+        }
+        check(session.status == SessionStatus.PLANNED || session.status == SessionStatus.IN_PROGRESS) {
+            "Workout session $sessionId is ${session.status} and cannot be completed."
+        }
+
+        val finalStatus = WorkoutCompletionSemantics.finalSessionStatus(sessionExercises)
+        val startedAt = session.startedAt ?: now
+        val durationMinutes = session.startedAt
+            ?.let { started -> max(1, ((now - started) / 60_000L).toInt()) }
+            ?: session.targetDurationMinutes
+
+        val updated = sessionDao.finalizeOpenSession(
+            sessionId = sessionId,
+            status = finalStatus,
+            startedAt = startedAt,
+            completedAt = now,
+            duration = durationMinutes,
+            perceivedDifficulty = input.perceivedDifficulty,
+            energyLevel = input.energyLevel,
+            satisfactionRating = input.satisfactionRating,
+            notes = input.notes.trim()
+        )
+        if (updated == 0) {
+            val current = sessionDao.getById(sessionId)
+                ?: error("Workout session $sessionId no longer exists.")
+            check(WorkoutCompletionSemantics.isFinalized(current.status)) {
+                "Workout session $sessionId changed to ${current.status} before completion could be saved."
+            }
+            return@withTransaction WorkoutSessionCompletionResult(
+                sessionId = sessionId,
+                status = current.status,
+                alreadyFinalized = true,
+                completedExerciseCount = completedExercises.size,
+                skippedExerciseCount = skippedExercises.size,
+                unfinishedExerciseCount = unfinishedExercises.size
+            )
+        }
+
+        val completedExerciseIds = completedExercises.map { it.exerciseId }.distinct()
+        if (completedExerciseIds.isNotEmpty()) {
+            val exerciseUpdates = exerciseDao.markPerformed(completedExerciseIds, now)
+            check(exerciseUpdates == completedExerciseIds.size) {
+                "Workout completion could not update all completed exercise stats."
+            }
+        }
+
+        val categoryFrequency = linkedMapOf<WorkoutCategory, Int>()
+        completedExercises.forEach { sessionExercise ->
+            exerciseDao.getCategoriesForExercise(sessionExercise.exerciseId)
+                .filter { it != WorkoutCategory.CUSTOM }
+                .forEach { category ->
+                    categoryFrequency[category] = (categoryFrequency[category] ?: 0) + 1
+                }
+        }
+        val totalAssignments = categoryFrequency.values.sum().coerceAtLeast(1)
+        categoryFrequency.forEach { (category, count) ->
+            check(userGoalDao.recordCategoryTraining(category, now) == 1) {
+                "Category stats for $category are not initialized."
+            }
+            val minutes = (durationMinutes.toFloat() * count / totalAssignments).roundToInt().coerceAtLeast(1)
+            check(userGoalDao.addCategoryMinutes(category, minutes, now) == 1) {
+                "Category stats for $category are not initialized."
+            }
+        }
+        userGoalDao.recalculateDaysSinceLastTrained(now)
+
+        updateCompletionFeedback(
+            sessionId = sessionId,
+            completedExerciseIds = completedExercises.map { it.exerciseId }.toSet(),
+            skippedExerciseIds = skippedExercises.map { it.exerciseId }.toSet(),
+            notCompletedExerciseIds = unfinishedExercises.map { it.exerciseId }.toSet(),
+            input = input
+        )
+        cachePreferenceScores(sessionExercises.map { it.exerciseId }.distinct(), now)
+
+        WorkoutSessionCompletionResult(
+            sessionId = sessionId,
+            status = finalStatus,
+            alreadyFinalized = false,
+            completedExerciseCount = completedExercises.size,
+            skippedExerciseCount = skippedExercises.size,
+            unfinishedExerciseCount = unfinishedExercises.size
+        )
+    }
+
     suspend fun skipSession(sessionId: Long) =
         sessionDao.updateStatus(sessionId, SessionStatus.SKIPPED)
 
@@ -113,11 +230,17 @@ class WorkoutSessionRepository @Inject constructor(
     suspend fun getExercisesForSessionSync(sessionId: Long): List<SessionExercise> =
         sessionDao.getExercisesForSessionSync(sessionId)
 
-    suspend fun markExerciseCompleted(exerciseId: Long, completed: Boolean = true) =
-        sessionDao.setExerciseCompleted(exerciseId, completed)
+    suspend fun markExerciseCompleted(exerciseId: Long, completed: Boolean = true) {
+        check(sessionDao.setExerciseCompleted(exerciseId, completed) == 1) {
+            "Session exercise $exerciseId no longer exists."
+        }
+    }
 
-    suspend fun markExerciseSkipped(exerciseId: Long, skipped: Boolean = true) =
-        sessionDao.setExerciseSkipped(exerciseId, skipped)
+    suspend fun markExerciseSkipped(exerciseId: Long, skipped: Boolean = true) {
+        check(sessionDao.setExerciseSkipped(exerciseId, skipped) == 1) {
+            "Session exercise $exerciseId no longer exists."
+        }
+    }
 
     // Set logging
     suspend fun logSet(setLog: SetLog): Long = sessionDao.insertSetLog(setLog)
@@ -236,6 +359,83 @@ class WorkoutSessionRepository @Inject constructor(
         }
         return sessionDao.insertWithExercises(session, sessionExercises)
     }
+
+    private suspend fun updateCompletionFeedback(
+        sessionId: Long,
+        completedExerciseIds: Set<Long>,
+        skippedExerciseIds: Set<Long>,
+        notCompletedExerciseIds: Set<Long>,
+        input: WorkoutSessionCompletionInput
+    ) {
+        val events = mlFeedbackDao.getEventsForSession(sessionId)
+        events.forEach { event ->
+            val action = when (event.exerciseId) {
+                in completedExerciseIds -> FeedbackAction.COMPLETED
+                in skippedExerciseIds -> FeedbackAction.SKIPPED
+                in notCompletedExerciseIds -> FeedbackAction.NOT_COMPLETED
+                else -> event.action
+            }
+            mlFeedbackDao.updateEventOutcome(
+                sessionId = sessionId,
+                exerciseId = event.exerciseId,
+                action = action,
+                difficulty = input.perceivedDifficulty,
+                rating = input.satisfactionRating
+            )
+        }
+    }
+
+    private suspend fun cachePreferenceScores(exerciseIds: List<Long>, now: Long) {
+        val scores = mutableListOf<MLPreferenceScore>()
+        exerciseIds.forEach { exerciseId ->
+            val positive = mlFeedbackDao.getPositiveCountForExercise(exerciseId)
+            val negative = mlFeedbackDao.getNegativeCountForExercise(exerciseId)
+            val total = positive + negative
+            if (total > 0) {
+                scores.add(
+                    MLPreferenceScore(
+                        key = "exercise:$exerciseId",
+                        score = calculatePreference(positive, negative),
+                        confidence = minOf(1f, total / 20f),
+                        sampleCount = total,
+                        updatedAt = now
+                    )
+                )
+            }
+        }
+
+        WorkoutCategory.rotationCategories().forEach { category ->
+            val positive = mlFeedbackDao.getPositiveCountForCategory(category)
+            val negative = mlFeedbackDao.getNegativeCountForCategory(category)
+            val total = positive + negative
+            if (total > 0) {
+                scores.add(
+                    MLPreferenceScore(
+                        key = "category:${category.name}",
+                        score = calculatePreference(positive, negative),
+                        confidence = minOf(1f, total / 30f),
+                        sampleCount = total,
+                        updatedAt = now
+                    )
+                )
+            }
+        }
+
+        if (scores.isNotEmpty()) {
+            mlFeedbackDao.insertPreferenceScores(scores)
+        }
+    }
+
+    private fun calculatePreference(positive: Int, negative: Int): Float {
+        val total = positive + negative
+        if (total == 0) return 0f
+        val p = positive.toFloat() / total
+        val z = 1.96f
+        val denominator = 1 + z * z / total
+        val center = p + z * z / (2 * total)
+        val spread = kotlin.math.sqrt((p * (1 - p) + z * z / (4 * total)) / total)
+        return ((center - z * spread) / denominator * 2 - 1).coerceIn(-1f, 1f)
+    }
 }
 
 /**
@@ -249,4 +449,20 @@ data class SessionExerciseConfig(
     val restSeconds: Int = 90,
     val prescriptionJson: String = "",
     val notes: String = ""
+)
+
+data class WorkoutSessionCompletionInput(
+    val perceivedDifficulty: Int,
+    val energyLevel: Int,
+    val satisfactionRating: Int,
+    val notes: String
+)
+
+data class WorkoutSessionCompletionResult(
+    val sessionId: Long,
+    val status: SessionStatus,
+    val alreadyFinalized: Boolean,
+    val completedExerciseCount: Int,
+    val skippedExerciseCount: Int,
+    val unfinishedExerciseCount: Int
 )

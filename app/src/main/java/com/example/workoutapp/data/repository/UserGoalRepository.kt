@@ -42,11 +42,13 @@ class UserGoalRepository @Inject constructor(
     suspend fun getCategoryStats(category: WorkoutCategory): CategoryStats? =
         userGoalDao.getCategoryStats(category)
 
-    suspend fun recordCategoryTraining(category: WorkoutCategory) =
-        userGoalDao.recordCategoryTraining(category)
+    suspend fun recordCategoryTraining(category: WorkoutCategory) {
+        check(userGoalDao.recordCategoryTraining(category) == 1) { "Category stats for $category are not initialized." }
+    }
 
-    suspend fun addCategoryTrainingMinutes(category: WorkoutCategory, minutes: Int) =
-        userGoalDao.addCategoryMinutes(category, minutes)
+    suspend fun addCategoryTrainingMinutes(category: WorkoutCategory, minutes: Int) {
+        check(userGoalDao.addCategoryMinutes(category, minutes) == 1) { "Category stats for $category are not initialized." }
+    }
 
     suspend fun recalculateDaysSinceLastTrained() =
         userGoalDao.recalculateDaysSinceLastTrained()

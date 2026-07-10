@@ -83,13 +83,14 @@ class DashboardViewModel @Inject constructor(
                 val statsMap = stats.associate { it.category to it.daysSinceLastTrained }
                 val weightsResult = userGoalRepository.getCategoryWeightsResult()
                 val weights = weightsResult.value
-                val score = DashboardAnalytics.balanceScore(stats, weights)
+                val balanceStatus = DashboardAnalytics.balanceStatus(stats, weights)
                 val balances = DashboardAnalytics.categoryBalances(stats, weights)
                 _uiState.update {
                     it.copy(
                         categoryStats = statsMap,
                         categoryStatsList = stats,
-                        balanceScore = score,
+                        balanceStatus = balanceStatus,
+                        balanceScore = (balanceStatus as? DashboardAnalytics.BalanceStatus.Ready)?.score,
                         categoryBalances = balances,
                         error = weightsResult.issues.toUserMessage().ifBlank { null }
                     ).withRecommendation()
@@ -160,7 +161,7 @@ internal fun currentWeekBounds(
 private fun DashboardUiState.withRecommendation(): DashboardUiState = copy(
     recommendation = DashboardAnalytics.nextRecommendation(
         pendingPTRoutineCount = pendingPTRoutines.size,
-        balanceScore = balanceScore.coerceAtLeast(0),
+        balanceStatus = balanceStatus,
         categoryBalances = categoryBalances,
         neglectedExercises = neglectedExercises
     )
@@ -175,7 +176,14 @@ data class DashboardUiState(
     val pendingPTRoutines: List<PhysicalTherapyRoutine> = emptyList(),
     val categoryStats: Map<WorkoutCategory, Int> = emptyMap(),
     val categoryStatsList: List<CategoryStats> = emptyList(),
-    val balanceScore: Int = -1,  // -1 = not yet computed
+    val balanceStatus: DashboardAnalytics.BalanceStatus =
+        DashboardAnalytics.BalanceStatus.BuildingBaseline(
+            DashboardAnalytics.BalanceBaselineProgress(
+                trainedCategories = 0,
+                totalCategorySessions = 0
+            )
+        ),
+    val balanceScore: Int? = null,
     val categoryBalances: List<DashboardAnalytics.CategoryBalance> = emptyList(),
     val neglectedExercises: List<DashboardAnalytics.NeglectedExerciseAlert> = emptyList(),
     val weeklyTrend: List<DashboardAnalytics.WeeklyTrend> = emptyList(),

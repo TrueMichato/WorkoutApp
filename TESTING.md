@@ -4,24 +4,51 @@
 
 ### Fast local validation
 ```zsh
-./gradlew :app:compileDebugKotlin
-./gradlew :app:testDebugUnitTest
-./gradlew :app:compileDebugAndroidTestKotlin
+./gradlew --no-daemon --console=plain \
+  :app:testDebugUnitTest \
+  :app:compileDebugAndroidTestKotlin \
+  :app:lintDebug \
+  :app:assembleDebug
 ```
 
 ### Instrumentation smoke tests
-These use Hilt with an in-memory Room database so each test starts from a clean app state.
+These use `HiltTestRunner`, `HiltTestApplication`, Android Test Orchestrator, and an in-memory Room database so each test starts from a clean app state. They are intended to run on a stable API 35 Google APIs x86_64 emulator or equivalent hosted Android device with hardware acceleration.
+
+Confirm the host can see one compatible device before running the connected lane:
 
 ```zsh
-./gradlew :app:connectedDebugAndroidTest \
+adb devices -l
+```
+
+Run all connected smoke tests:
+
+```zsh
+./gradlew --no-daemon --console=plain :app:connectedDebugAndroidTest
+```
+
+Run an individual smoke test class while diagnosing a failure:
+
+```zsh
+./gradlew --no-daemon --console=plain :app:connectedDebugAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=com.example.workoutapp.ExerciseLibraryFlowTest
 
-./gradlew :app:connectedDebugAndroidTest \
+./gradlew --no-daemon --console=plain :app:connectedDebugAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=com.example.workoutapp.WorkoutPlanFlowTest
 
-./gradlew :app:connectedDebugAndroidTest \
+./gradlew --no-daemon --console=plain :app:connectedDebugAndroidTest \
   -Pandroid.testInstrumentationRunnerArguments.class=com.example.workoutapp.WorkoutSessionRepositoryInstrumentedTest
 ```
+
+If Gradle reports `0 compatible devices` while an emulator appears to be running, recreate the lane on the supported matrix used by CI: API 35, `google_apis`, `x86_64`, Pixel 2 profile. API preview images or locally wedged emulators can fail discovery before any project test code executes.
+
+### CI validation
+
+GitHub Actions runs `.github/workflows/android.yml` on pushes and pull requests to `main`:
+
+- `host-validation`: `:app:testDebugUnitTest`, `:app:compileDebugAndroidTestKotlin`, `:app:lintDebug`, and `:app:assembleDebug`.
+- `connected-smoke`: starts an API 35 Google APIs x86_64 Pixel 2 emulator with `reactivecircus/android-emulator-runner` and runs `:app:connectedDebugAndroidTest`.
+
+Both jobs use JDK 17 and Gradle caching. Failure reports are uploaded from `app/build/reports/**`, `app/build/test-results/**`, and `app/build/outputs/androidTest-results/**`.
 
 ## What the new instrumentation tests cover
 
@@ -45,5 +72,4 @@ These use Hilt with an in-memory Room database so each test starts from a clean 
 - Add more test tags to `ActiveWorkoutScreen` for set logging and completion flows.
 - Cover generator preview save-as-plan and history views.
 - Add CSV import seams via a fake importer or import abstraction.
-- Add CI device coverage using a managed emulator or hosted Android runner.
-
+- Add more device coverage if regressions are found on additional supported API levels.

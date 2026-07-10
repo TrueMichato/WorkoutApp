@@ -107,26 +107,22 @@ class ExerciseDetailViewModel @Inject constructor(
 
     fun archiveExercise() {
         viewModelScope.launch {
-            exerciseRepository.archiveExercise(currentExerciseId)
-            _uiState.update { it.copy(isDeleted = true) }
+            try {
+                exerciseRepository.archiveExercise(currentExerciseId)
+                _uiState.update { it.copy(archiveCompleted = true, error = null) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message ?: "Failed to archive exercise") }
+            }
         }
     }
 
-    fun deleteExercise() {
+    fun restoreExercise() {
         viewModelScope.launch {
-            val exercise = _uiState.value.exercise ?: return@launch
             try {
-                val mediaToDelete = mediaStorageManager.decodeLocalMediaUris(exercise.localMediaUris).value
-                exerciseRepository.deleteExercise(exercise)
-                mediaStorageManager.deleteUnreferencedMedia(
-                    candidateUris = mediaToDelete,
-                    allExercises = exerciseRepository.getAllExercisesIncludingArchived()
-                )
-                _uiState.update { it.copy(isDeleted = true) }
-            } catch (e: PersistedDataDecodeException) {
-                _uiState.update { it.copy(error = e.message ?: "Saved media could not be decoded.") }
-            } catch (e: MediaStorageException) {
-                _uiState.update { it.copy(error = e.message ?: "Media cleanup failed.") }
+                exerciseRepository.unarchiveExercise(currentExerciseId)
+                _uiState.update { it.copy(error = null) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message ?: "Failed to restore exercise") }
             }
         }
     }
@@ -174,6 +170,6 @@ data class ExerciseDetailUiState(
     val dataWarnings: List<String> = emptyList(),
     val currentPhase: TrainingPhase = TrainingPhase.BALANCED,
     val isLoading: Boolean = true,
-    val isDeleted: Boolean = false,
+    val archiveCompleted: Boolean = false,
     val error: String? = null
 )

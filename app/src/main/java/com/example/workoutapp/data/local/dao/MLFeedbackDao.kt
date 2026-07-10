@@ -59,7 +59,7 @@ interface MLFeedbackDao {
 
     @Query("""
         SELECT COUNT(*) FROM ml_feedback_events 
-        WHERE exerciseId = :exerciseId AND `action` IN ('REJECTED', 'SKIPPED', 'SWAPPED')
+        WHERE exerciseId = :exerciseId AND `action` IN ('REJECTED', 'SKIPPED', 'NOT_COMPLETED', 'SWAPPED')
     """)
     suspend fun getNegativeCountForExercise(exerciseId: Long): Int
 
@@ -71,7 +71,7 @@ interface MLFeedbackDao {
 
     @Query("""
         SELECT COUNT(*) FROM ml_feedback_events 
-        WHERE suggestedCategory = :category AND `action` IN ('REJECTED', 'SKIPPED', 'SWAPPED')
+        WHERE suggestedCategory = :category AND `action` IN ('REJECTED', 'SKIPPED', 'NOT_COMPLETED', 'SWAPPED')
     """)
     suspend fun getNegativeCountForCategory(category: WorkoutCategory): Int
 
@@ -125,6 +125,5 @@ interface MLFeedbackDao {
     @Query("DELETE FROM ml_feedback_events")
     suspend fun clearAllEvents()
 }
-
 
 

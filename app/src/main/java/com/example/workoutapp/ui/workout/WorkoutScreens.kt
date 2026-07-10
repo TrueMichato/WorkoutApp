@@ -11,11 +11,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -32,6 +35,8 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Button
@@ -65,14 +70,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.workoutapp.data.model.ExerciseCompletionState
+import com.example.workoutapp.data.model.SessionExercise
 import com.example.workoutapp.data.model.SessionStatus
+import com.example.workoutapp.data.model.SetEntryFieldErrors
 import com.example.workoutapp.data.model.SetLog
+import com.example.workoutapp.data.model.SetMetricVisibility
 import com.example.workoutapp.data.model.TimeSlot
 import com.example.workoutapp.data.model.TrainingPhase
 import com.example.workoutapp.data.model.WorkoutCategory
@@ -839,6 +855,7 @@ fun ActiveWorkoutScreen(
     }
 
     Scaffold(
+        modifier = Modifier.testTag(TestTags.ActiveWorkout.Screen),
         topBar = {
             TopAppBar(
                 title = { Text(uiState.session?.name ?: "Workout") },
@@ -859,13 +876,18 @@ fun ActiveWorkoutScreen(
             )
             else -> {
                 val session = requireNotNull(uiState.session)
-                val completedCount = uiState.exercises.count { it.sessionExercise.isCompleted }
+                val completedCount = uiState.exercises.count { it.completionState == ExerciseCompletionState.COMPLETED }
+                val skippedCount = uiState.exercises.count { it.completionState == ExerciseCompletionState.SKIPPED }
+                val loggedCount = uiState.exercises.count { it.completionState == ExerciseCompletionState.LOGGED }
                 val progress = if (uiState.exercises.isEmpty()) 0f else completedCount / uiState.exercises.size.toFloat()
+                val currentItem = uiState.exercises.firstOrNull { it.sessionExercise.id == uiState.focusedExerciseId }
+                val upcomingItems = uiState.exercises.filterNot { it.sessionExercise.id == currentItem?.sessionExercise?.id }
 
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(paddingValues),
+                        .padding(paddingValues)
+                        .testTag(TestTags.ActiveWorkout.ContentList),
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
@@ -898,13 +920,16 @@ fun ActiveWorkoutScreen(
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Text(
-                                    "$completedCount / ${uiState.exercises.size} exercises completed",
+                                   "$completedCount done • $skippedCount skipped • $loggedCount logged only",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
 
                                 if (session.status == SessionStatus.PLANNED) {
-                                    Button(onClick = viewModel::startWorkout, modifier = Modifier.fillMaxWidth()) {
+                                    Button(
+                                        onClick = viewModel::startWorkout,
+                                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                                    ) {
                                         Icon(Icons.Default.PlayArrow, null)
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text("Start workout")
@@ -914,22 +939,59 @@ fun ActiveWorkoutScreen(
                         }
                     }
 
-                    items(uiState.exercises, key = { it.sessionExercise.id }) { item ->
-                        SessionExerciseCard(
+                    uiState.error?.let { error ->
+                        item {
+                            Surface(
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                shape = MaterialTheme.shapes.medium,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = error,
+                                    modifier = Modifier.padding(16.dp),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    }
+
+                    if (currentItem != null) {
+                        item {
+                            CurrentExerciseCard(
+                                item = currentItem,
+                                onCompletedChanged = { completed ->
+                                    viewModel.toggleExerciseCompleted(currentItem.sessionExercise, completed)
+                                },
+                                onSkippedChanged = { skipped ->
+                                    viewModel.toggleExerciseSkipped(currentItem.sessionExercise, skipped)
+                                },
+                                onDraftRepsChanged = { viewModel.updateSetDraftReps(currentItem.sessionExercise.id, it) },
+                                onDraftWeightChanged = { viewModel.updateSetDraftWeight(currentItem.sessionExercise.id, it) },
+                                onDraftDurationChanged = { viewModel.updateSetDraftDuration(currentItem.sessionExercise.id, it) },
+                                onDraftRpeChanged = { viewModel.updateSetDraftRpe(currentItem.sessionExercise.id, it) },
+                                onDraftNotesChanged = { viewModel.updateSetDraftNotes(currentItem.sessionExercise.id, it) },
+                                onSaveSet = { viewModel.saveSetLog(currentItem) },
+                                onDeleteSet = viewModel::deleteSetLog,
+                                onRepeatLastSet = { viewModel.repeatLastSet(currentItem) }
+                            )
+                        }
+                    }
+
+                    if (upcomingItems.isNotEmpty()) {
+                        item {
+                            Text(
+                                if (currentItem == null) "Exercises" else "Up next",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    items(upcomingItems, key = { it.sessionExercise.id }) { item ->
+                        UpcomingExerciseRow(
                             item = item,
-                            onCompletedChanged = { completed ->
-                                viewModel.toggleExerciseCompleted(item.sessionExercise, completed)
-                            },
-                            onSkippedChanged = { skipped ->
-                                viewModel.toggleExerciseSkipped(item.sessionExercise, skipped)
-                            },
-                            onDraftRepsChanged = { viewModel.updateSetDraftReps(item.sessionExercise.id, it) },
-                            onDraftWeightChanged = { viewModel.updateSetDraftWeight(item.sessionExercise.id, it) },
-                            onDraftDurationChanged = { viewModel.updateSetDraftDuration(item.sessionExercise.id, it) },
-                            onDraftRpeChanged = { viewModel.updateSetDraftRpe(item.sessionExercise.id, it) },
-                            onDraftNotesChanged = { viewModel.updateSetDraftNotes(item.sessionExercise.id, it) },
-                            onSaveSet = { viewModel.saveSetLog(item) },
-                            onDeleteSet = { setLog -> viewModel.deleteSetLog(item, setLog) }
+                            onFocus = { viewModel.setFocusedExercise(item.sessionExercise.id) }
                         )
                     }
 
@@ -1112,7 +1174,7 @@ private fun SessionSummaryCard(
 }
 
 @Composable
-private fun SessionExerciseCard(
+private fun CurrentExerciseCard(
     item: SessionExerciseUi,
     onCompletedChanged: (Boolean) -> Unit,
     onSkippedChanged: (Boolean) -> Unit,
@@ -1122,24 +1184,37 @@ private fun SessionExerciseCard(
     onDraftRpeChanged: (String) -> Unit,
     onDraftNotesChanged: (String) -> Unit,
     onSaveSet: () -> Unit,
-    onDeleteSet: (SetLog) -> Unit
+    onDeleteSet: (SetLog) -> Unit,
+    onRepeatLastSet: () -> Unit
 ) {
-    OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+    val focusManager = LocalFocusManager.current
+    val metrics = item.metricVisibility
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(TestTags.ActiveWorkout.CurrentExerciseCard)
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
+                "CURRENT EXERCISE",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
                 item.exercise?.name ?: "Exercise ${item.sessionExercise.exerciseId}",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
             )
             item.exercise?.description?.takeIf { it.isNotBlank() }?.let { description ->
                 Text(
                     description,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
@@ -1147,7 +1222,7 @@ private fun SessionExerciseCard(
             }
             Text(
                 "${item.sessionExercise.plannedSets} sets • ${item.sessionExercise.plannedReps} • ${item.sessionExercise.plannedRestSeconds}s rest",
-                style = MaterialTheme.typography.bodyMedium
+                style = MaterialTheme.typography.bodyLarge
             )
             val richPrescription = item.sessionExercise.prescriptionJson.toRichPrescriptionDataOrNull()
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1169,6 +1244,12 @@ private fun SessionExerciseCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                val statusLabel = statusLabel(item)
+                AssistChip(
+                    onClick = {},
+                    modifier = Modifier.semantics { stateDescription = statusLabel },
+                    label = { Text(statusLabel) }
+                )
             }
             item.sessionExercise.notes.takeIf { it.isNotBlank() }?.let { note ->
                 Text(
@@ -1177,20 +1258,39 @@ private fun SessionExerciseCard(
                     color = MaterialTheme.colorScheme.primary
                 )
             }
+            Text(
+                "Logging sets saves performance only. Tap Done when the exercise is finished, or Skip if you did not perform it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
-            // Complete / Skip toggles
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Complete / Skip toggles — big, unambiguous, one-handed targets.
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 FilterChip(
                     selected = item.sessionExercise.isCompleted,
                     onClick = { onCompletedChanged(!item.sessionExercise.isCompleted) },
                     label = { Text("Done") },
-                    leadingIcon = { Icon(Icons.Default.CheckCircle, null, modifier = Modifier.size(18.dp)) }
+                    leadingIcon = { Icon(Icons.Default.CheckCircle, null, modifier = Modifier.size(20.dp)) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .testTag(TestTags.ActiveWorkout.DoneButton)
+                        .semantics {
+                            stateDescription = if (item.sessionExercise.isCompleted) "Marked done" else "Not marked done"
+                        }
                 )
                 FilterChip(
                     selected = item.sessionExercise.isSkipped,
                     onClick = { onSkippedChanged(!item.sessionExercise.isSkipped) },
                     label = { Text("Skip") },
-                    leadingIcon = { Icon(Icons.Default.SkipNext, null, modifier = Modifier.size(18.dp)) }
+                    leadingIcon = { Icon(Icons.Default.SkipNext, null, modifier = Modifier.size(20.dp)) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp)
+                        .testTag(TestTags.ActiveWorkout.SkipButton)
+                        .semantics {
+                            stateDescription = if (item.sessionExercise.isSkipped) "Marked skipped" else "Not skipped"
+                        }
                 )
             }
 
@@ -1219,8 +1319,11 @@ private fun SessionExerciseCard(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-                                IconButton(onClick = { onDeleteSet(setLog) }) {
-                                    Icon(Icons.Default.Delete, "Delete set", modifier = Modifier.size(18.dp))
+                                IconButton(
+                                    onClick = { onDeleteSet(setLog) },
+                                    modifier = Modifier.size(48.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, "Delete set ${setLog.setNumber}")
                                 }
                             }
                         }
@@ -1228,62 +1331,231 @@ private fun SessionExerciseCard(
                 }
             }
 
-            // Log next set form
+            // Log next set form — only the metrics that apply to this exercise's prescription.
             OutlinedCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        "Log set ${item.setLogs.size + 1}",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = item.draft.reps,
-                            onValueChange = onDraftRepsChanged,
-                            modifier = Modifier.weight(1f),
-                            label = { Text("Reps") },
-                            singleLine = true
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Log set ${item.setLogs.size + 1}",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
                         )
-                        OutlinedTextField(
-                            value = item.draft.weight,
-                            onValueChange = onDraftWeightChanged,
-                            modifier = Modifier.weight(1f),
-                            label = { Text("Weight") },
-                            singleLine = true
-                        )
+                        if (item.setLogs.isNotEmpty()) {
+                            AssistChip(
+                                onClick = onRepeatLastSet,
+                                leadingIcon = { Icon(Icons.Default.Replay, null, modifier = Modifier.size(16.dp)) },
+                                label = { Text("Repeat last set") },
+                                modifier = Modifier
+                                    .heightIn(min = 40.dp)
+                                    .testTag(TestTags.ActiveWorkout.RepeatLastSetButton)
+                            )
+                        }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+                    if (metrics.showReps || metrics.showWeight) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (metrics.showReps) {
+                                SteppedNumberField(
+                                    value = item.draft.reps,
+                                    onValueChange = onDraftRepsChanged,
+                                    label = "Reps",
+                                    step = 1.0,
+                                    keyboardType = KeyboardType.Number,
+                                    errorText = item.fieldErrors.reps,
+                                    testTag = TestTags.ActiveWorkout.RepsField,
+                                    modifier = Modifier.weight(1f),
+                                    focusManager = focusManager
+                                )
+                            }
+                            if (metrics.showWeight) {
+                                SteppedNumberField(
+                                    value = item.draft.weight,
+                                    onValueChange = onDraftWeightChanged,
+                                    label = "Weight (kg)",
+                                    step = 2.5,
+                                    keyboardType = KeyboardType.Decimal,
+                                    errorText = item.fieldErrors.weight,
+                                    testTag = TestTags.ActiveWorkout.WeightField,
+                                    modifier = Modifier.weight(1f),
+                                    focusManager = focusManager
+                                )
+                            }
+                        }
+                    }
+                    if (metrics.showDuration) {
                         OutlinedTextField(
                             value = item.draft.durationSeconds,
                             onValueChange = onDraftDurationChanged,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag(TestTags.ActiveWorkout.DurationField),
                             label = { Text("Duration (s)") },
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = item.draft.rpe,
-                            onValueChange = onDraftRpeChanged,
-                            modifier = Modifier.weight(1f),
-                            label = { Text("RPE (1-10)") },
-                            singleLine = true
+                            singleLine = true,
+                            isError = item.fieldErrors.durationSeconds != null,
+                            supportingText = item.fieldErrors.durationSeconds?.let { errorText -> { Text(errorText) } },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
+                            keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Next) })
                         )
                     }
                     OutlinedTextField(
+                        value = item.draft.rpe,
+                        onValueChange = onDraftRpeChanged,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag(TestTags.ActiveWorkout.RpeField),
+                        label = { Text("RPE (1-10, optional)") },
+                        singleLine = true,
+                        isError = item.fieldErrors.rpe != null,
+                        supportingText = item.fieldErrors.rpe?.let { errorText -> { Text(errorText) } },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
+                        keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Next) })
+                    )
+                    OutlinedTextField(
                         value = item.draft.notes,
                         onValueChange = onDraftNotesChanged,
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Set notes") },
-                        singleLine = true
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag(TestTags.ActiveWorkout.NotesField),
+                        label = { Text("Set notes (optional)") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() })
                     )
-                    Button(onClick = onSaveSet, modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = {
+                            focusManager.clearFocus()
+                            onSaveSet()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .testTag(TestTags.ActiveWorkout.SaveSetButton)
+                    ) {
                         Text("Save Set")
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SteppedNumberField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    step: Double,
+    keyboardType: KeyboardType,
+    errorText: String?,
+    testTag: String,
+    focusManager: androidx.compose.ui.focus.FocusManager,
+    modifier: Modifier = Modifier
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier.testTag(testTag),
+        label = { Text(label) },
+        singleLine = true,
+        isError = errorText != null,
+        supportingText = errorText?.let { text -> { Text(text) } },
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = ImeAction.Next),
+        keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Next) }),
+        trailingIcon = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = { onValueChange(adjustNumericString(value, -step)) },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .semantics { contentDescription = "Decrease $label" }
+                ) {
+                    Icon(Icons.Default.Remove, null)
+                }
+                IconButton(
+                    onClick = { onValueChange(adjustNumericString(value, step)) },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .semantics { contentDescription = "Increase $label" }
+                ) {
+                    Icon(Icons.Default.Add, null)
+                }
+            }
+        }
+    )
+}
+
+private fun adjustNumericString(current: String, delta: Double): String {
+    // Guard against non-finite base values (NaN/Infinity from paste or accessibility input) so
+    // the stepper never produces a non-finite draft; fall back to a fresh baseline instead.
+    val parsedBase = current.trim().toDoubleOrNull()
+    val base = if (parsedBase != null && parsedBase.isFinite()) parsedBase else 0.0
+    val next = (base + delta).coerceAtLeast(0.0)
+    return if (next % 1.0 == 0.0) next.toInt().toString() else String.format(Locale.US, "%.1f", next)
+}
+
+private fun statusLabel(item: SessionExerciseUi): String = when (item.completionState) {
+    ExerciseCompletionState.NOT_STARTED -> "Not started"
+    ExerciseCompletionState.LOGGED -> "${item.setLogs.size} set(s) logged"
+    ExerciseCompletionState.COMPLETED -> "Done"
+    ExerciseCompletionState.SKIPPED -> "Skipped"
+}
+
+@Composable
+private fun UpcomingExerciseRow(
+    item: SessionExerciseUi,
+    onFocus: () -> Unit
+) {
+    val statusLabel = statusLabel(item)
+    OutlinedCard(
+        onClick = onFocus,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(TestTags.ActiveWorkout.upcomingRow(item.sessionExercise.id))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    item.exercise?.name ?: "Exercise ${item.sessionExercise.exerciseId}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    "${item.sessionExercise.plannedSets} sets • ${item.sessionExercise.plannedReps}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            val statusContainer = when (item.completionState) {
+                ExerciseCompletionState.COMPLETED -> MaterialTheme.colorScheme.tertiaryContainer
+                ExerciseCompletionState.SKIPPED -> MaterialTheme.colorScheme.surfaceVariant
+                else -> MaterialTheme.colorScheme.secondaryContainer
+            }
+            Surface(
+                color = statusContainer,
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier.semantics { stateDescription = statusLabel }
+            ) {
+                Text(
+                    statusLabel,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    style = MaterialTheme.typography.labelSmall
+                )
             }
         }
     }
@@ -1334,9 +1606,25 @@ private fun CompletionFeedbackCard(
                 placeholder = { Text("What felt good, bad, or worth repeating?") },
                 minLines = 3
             )
+            val finalStatusLabel = if (
+                uiState.exercises.isNotEmpty() &&
+                uiState.exercises.all { it.completionState == ExerciseCompletionState.COMPLETED }
+            ) {
+                "This will save a completed workout."
+            } else {
+                "This will save a partial workout; logged-only and skipped exercises will not count as completed."
+            }
+            Text(
+                finalStatusLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Button(
                 onClick = onCompleteWorkout,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .testTag(TestTags.ActiveWorkout.CompleteWorkoutButton),
                 enabled = !uiState.isCompleting
             ) {
                 if (uiState.isCompleting) {
@@ -1349,7 +1637,7 @@ private fun CompletionFeedbackCard(
                     Icon(Icons.Default.Check, null)
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(if (uiState.isCompleting) "Saving workout..." else "Complete Workout")
+                Text(if (uiState.isCompleting) "Saving workout..." else "Finish Workout")
             }
         }
     }

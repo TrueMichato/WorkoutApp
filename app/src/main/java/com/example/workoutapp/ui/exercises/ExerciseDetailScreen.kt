@@ -43,14 +43,12 @@ fun ExerciseDetailScreen(
         viewModel.loadExercise(exerciseId)
     }
 
-    // Handle deletion
-    LaunchedEffect(uiState.isDeleted) {
-        if (uiState.isDeleted) {
+    // Archive removes the exercise from normal library flows and returns to the list.
+    LaunchedEffect(uiState.archiveCompleted) {
+        if (uiState.archiveCompleted) {
             onNavigateBack()
         }
     }
-
-    var showDeleteDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -86,28 +84,25 @@ fun ExerciseDetailScreen(
                         expanded = showMenu,
                         onDismissRequest = { showMenu = false }
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("Archive") },
-                            onClick = {
-                                showMenu = false
-                                viewModel.archiveExercise()
-                            },
-                            leadingIcon = { Icon(Icons.Default.Archive, null) }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                            onClick = {
-                                showMenu = false
-                                showDeleteDialog = true
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    null,
-                                    tint = MaterialTheme.colorScheme.error
-                                )
-                            }
-                        )
+                        if (uiState.exercise?.isArchived == true) {
+                            DropdownMenuItem(
+                                text = { Text("Restore") },
+                                onClick = {
+                                    showMenu = false
+                                    viewModel.restoreExercise()
+                                },
+                                leadingIcon = { Icon(Icons.Default.Unarchive, null) }
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                text = { Text("Archive") },
+                                onClick = {
+                                    showMenu = false
+                                    viewModel.archiveExercise()
+                                },
+                                leadingIcon = { Icon(Icons.Default.Archive, null) }
+                            )
+                        }
                     }
                 }
             )
@@ -230,6 +225,19 @@ fun ExerciseDetailScreen(
                                     "Unilateral",
                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                                     style = MaterialTheme.typography.labelMedium
+                                )
+                            }
+                        }
+                        if (exercise.isArchived) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                shape = MaterialTheme.shapes.small
+                            ) {
+                                Text(
+                                    "Archived",
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
                                 )
                             }
                         }
@@ -486,33 +494,12 @@ fun ExerciseDetailScreen(
         }
     }
 
-    // Delete confirmation dialog
-    if (showDeleteDialog) {
-        AlertDialog(
-            onDismissRequest = { showDeleteDialog = false },
-            title = { Text("Delete Exercise?") },
-            text = {
-                Text("This will permanently delete \"${uiState.exercise?.name}\". This action cannot be undone.")
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteDialog = false
-                        viewModel.deleteExercise()
-                    },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
-                ) {
-                    Text("Delete")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
+    uiState.error?.let { error ->
+        Snackbar(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Text(error)
+        }
     }
 }
 

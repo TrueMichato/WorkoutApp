@@ -1,8 +1,12 @@
 package com.example.workoutapp.ui.workout
 
+import androidx.lifecycle.SavedStateHandle
+import androidx.room.InvalidationTracker
+import com.example.workoutapp.data.local.WorkoutDatabase
 import com.example.workoutapp.data.local.dao.EquipmentDao
 import com.example.workoutapp.data.local.dao.ExerciseDao
 import com.example.workoutapp.data.local.dao.MLFeedbackDao
+import com.example.workoutapp.data.local.dao.PhysicalTherapyDao
 import com.example.workoutapp.data.local.dao.UserGoalDao
 import com.example.workoutapp.data.local.dao.WorkoutPlanTemplateDao
 import com.example.workoutapp.data.local.dao.WorkoutSessionDao
@@ -114,7 +118,21 @@ class WorkoutViewModelPreviewDecisionTest {
         val equipmentRepository = EquipmentRepository(equipmentDao)
         val userGoalRepository = UserGoalRepository(userGoalDao)
         val feedbackRepository = MLFeedbackRepository(feedbackDao)
-        val sessionRepository = WorkoutSessionRepository(sessionDao, templateDao)
+        val database = FakeWorkoutDatabase(
+            exerciseDao = exerciseDao,
+            sessionDao = sessionDao,
+            templateDao = templateDao,
+            userGoalDao = userGoalDao,
+            feedbackDao = feedbackDao
+        )
+        val sessionRepository = WorkoutSessionRepository(
+            database = database,
+            sessionDao = sessionDao,
+            templateDao = templateDao,
+            exerciseDao = exerciseDao,
+            userGoalDao = userGoalDao,
+            mlFeedbackDao = feedbackDao
+        )
         val recommender = WorkoutRecommender(feedbackRepository)
         val planner = WorkoutPlanner(
             exerciseRepository = exerciseRepository,
@@ -132,7 +150,8 @@ class WorkoutViewModelPreviewDecisionTest {
                 equipmentRepository = equipmentRepository,
                 userGoalRepository = userGoalRepository,
                 mlFeedbackRepository = feedbackRepository,
-                workoutPlanner = planner
+                workoutPlanner = planner,
+                savedStateHandle = SavedStateHandle()
             ),
             feedbackDao = feedbackDao
         )
@@ -206,8 +225,8 @@ private class PreviewUserGoalDao(
     override suspend fun getCategoryStats(category: WorkoutCategory): CategoryStats? = stats[category]
     override fun getAllCategoryStats(): Flow<List<CategoryStats>> = flowOf(stats.values.toList())
     override fun getCategoryStatsByNeglect(): Flow<List<CategoryStats>> = flowOf(stats.values.toList())
-    override suspend fun recordCategoryTraining(category: WorkoutCategory, timestamp: Long) = Unit
-    override suspend fun addCategoryMinutes(category: WorkoutCategory, minutes: Int, timestamp: Long) = Unit
+    override suspend fun recordCategoryTraining(category: WorkoutCategory, timestamp: Long): Int = 1
+    override suspend fun addCategoryMinutes(category: WorkoutCategory, minutes: Int, timestamp: Long): Int = 1
     override suspend fun recalculateDaysSinceLastTrained(now: Long) = Unit
 }
 
@@ -222,8 +241,8 @@ private class FakeExerciseDao : ExerciseDao {
     override suspend fun insert(exercise: Exercise): Long = exercise.id
     override suspend fun insertAll(exercises: List<Exercise>): List<Long> = exercises.map { it.id }
     override suspend fun update(exercise: Exercise): Int = 1
-    override suspend fun delete(exercise: Exercise) = Unit
-    override suspend fun deleteById(exerciseId: Long) = Unit
+    override suspend fun delete(exercise: Exercise): Int = 1
+    override suspend fun deleteById(exerciseId: Long): Int = 1
     override suspend fun getById(id: Long): Exercise? = exercises.value.firstOrNull { it.id == id }
     override fun getByIdFlow(id: Long): Flow<Exercise?> = flowOf(exercises.value.firstOrNull { it.id == id })
     override fun getAllActive(): Flow<List<Exercise>> = exercises
@@ -235,9 +254,11 @@ private class FakeExerciseDao : ExerciseDao {
     override fun getNeglected(beforeTimestamp: Long, limit: Int): Flow<List<Exercise>> = flowOf(emptyList())
     override fun search(query: String): Flow<List<Exercise>> = flowOf(emptyList())
     override fun getByDifficulty(difficulty: Difficulty): Flow<List<Exercise>> = flowOf(emptyList())
-    override suspend fun markPerformed(exerciseId: Long, timestamp: Long) = Unit
+    override suspend fun markPerformed(exerciseId: Long, timestamp: Long): Int = 1
+    override suspend fun markPerformed(exerciseIds: List<Long>, timestamp: Long): Int = exerciseIds.size
     override suspend fun setFavorite(exerciseId: Long, isFavorite: Boolean, timestamp: Long) = Unit
-    override suspend fun setArchived(exerciseId: Long, isArchived: Boolean, timestamp: Long) = Unit
+    override suspend fun setArchived(exerciseId: Long, isArchived: Boolean, timestamp: Long): Int = 1
+    override suspend fun getReferenceCount(exerciseId: Long): Int = 0
     override suspend fun insertCategoryRef(ref: ExerciseCategoryCrossRef) = Unit
     override suspend fun insertCategoryRefs(refs: List<ExerciseCategoryCrossRef>) = Unit
     override suspend fun clearCategoriesForExercise(exerciseId: Long) = Unit
@@ -359,14 +380,25 @@ private class FakeWorkoutSessionDao : WorkoutSessionDao {
     override suspend fun updateStatus(sessionId: Long, status: SessionStatus, timestamp: Long) = Unit
     override suspend fun startSession(sessionId: Long, timestamp: Long) = Unit
     override suspend fun completeSession(sessionId: Long, duration: Int, timestamp: Long) = Unit
+    override suspend fun finalizeOpenSession(
+        sessionId: Long,
+        status: SessionStatus,
+        startedAt: Long,
+        completedAt: Long,
+        duration: Int,
+        perceivedDifficulty: Int,
+        energyLevel: Int,
+        satisfactionRating: Int,
+        notes: String
+    ): Int = 1
     override suspend fun insertSessionExercise(exercise: SessionExercise): Long = exercise.id
     override suspend fun insertSessionExercises(exercises: List<SessionExercise>): List<Long> = exercises.map { it.id }
     override suspend fun updateSessionExercise(exercise: SessionExercise) = Unit
     override suspend fun deleteSessionExercise(exercise: SessionExercise) = Unit
     override fun getExercisesForSession(sessionId: Long): Flow<List<SessionExercise>> = flowOf(emptyList())
     override suspend fun getExercisesForSessionSync(sessionId: Long): List<SessionExercise> = emptyList()
-    override suspend fun setExerciseCompleted(id: Long, isCompleted: Boolean) = Unit
-    override suspend fun setExerciseSkipped(id: Long, isSkipped: Boolean) = Unit
+    override suspend fun setExerciseCompleted(id: Long, isCompleted: Boolean): Int = 1
+    override suspend fun setExerciseSkipped(id: Long, isSkipped: Boolean): Int = 1
     override suspend fun insertSetLog(log: SetLog): Long = log.id
     override suspend fun insertSetLogs(logs: List<SetLog>): List<Long> = logs.map { it.id }
     override suspend fun updateSetLog(log: SetLog) = Unit
@@ -388,4 +420,22 @@ private class FakeWorkoutPlanTemplateDao : WorkoutPlanTemplateDao {
     override suspend fun getExercisesForTemplate(templateId: Long): List<WorkoutPlanTemplateExercise> = emptyList()
     override suspend fun insertTemplateExercises(exercises: List<WorkoutPlanTemplateExercise>): List<Long> = exercises.map { it.id }
     override suspend fun clearExercisesForTemplate(templateId: Long) = Unit
+}
+
+private class FakeWorkoutDatabase(
+    private val exerciseDao: ExerciseDao,
+    private val sessionDao: WorkoutSessionDao,
+    private val templateDao: WorkoutPlanTemplateDao,
+    private val userGoalDao: UserGoalDao,
+    private val feedbackDao: MLFeedbackDao
+) : WorkoutDatabase() {
+    override fun createInvalidationTracker(): InvalidationTracker = error("Not used in this test")
+    override fun clearAllTables() = error("Not used in this test")
+    override fun exerciseDao(): ExerciseDao = exerciseDao
+    override fun equipmentDao(): EquipmentDao = error("Not used in this test")
+    override fun workoutSessionDao(): WorkoutSessionDao = sessionDao
+    override fun workoutPlanTemplateDao(): WorkoutPlanTemplateDao = templateDao
+    override fun physicalTherapyDao(): PhysicalTherapyDao = error("Not used in this test")
+    override fun userGoalDao(): UserGoalDao = userGoalDao
+    override fun mlFeedbackDao(): MLFeedbackDao = feedbackDao
 }

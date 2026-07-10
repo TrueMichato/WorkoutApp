@@ -86,11 +86,36 @@ interface WorkoutSessionDao {
     suspend fun startSession(sessionId: Long, timestamp: Long = System.currentTimeMillis())
 
     @Query("""
-        UPDATE workout_sessions 
-        SET status = 'COMPLETED', completedAt = :timestamp, actualDurationMinutes = :duration, updatedAt = :timestamp 
+        UPDATE workout_sessions
+        SET status = 'COMPLETED', completedAt = :timestamp, actualDurationMinutes = :duration, updatedAt = :timestamp
         WHERE id = :sessionId
     """)
     suspend fun completeSession(sessionId: Long, duration: Int, timestamp: Long = System.currentTimeMillis())
+
+    @Query("""
+        UPDATE workout_sessions
+        SET status = :status,
+            startedAt = COALESCE(startedAt, :startedAt),
+            completedAt = :completedAt,
+            actualDurationMinutes = :duration,
+            perceivedDifficulty = :perceivedDifficulty,
+            energyLevel = :energyLevel,
+            satisfactionRating = :satisfactionRating,
+            postSessionNotes = :notes,
+            updatedAt = :completedAt
+        WHERE id = :sessionId AND status IN ('PLANNED', 'IN_PROGRESS')
+    """)
+    suspend fun finalizeOpenSession(
+        sessionId: Long,
+        status: SessionStatus,
+        startedAt: Long,
+        completedAt: Long,
+        duration: Int,
+        perceivedDifficulty: Int,
+        energyLevel: Int,
+        satisfactionRating: Int,
+        notes: String
+    ): Int
 
     // Session exercises
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -111,11 +136,21 @@ interface WorkoutSessionDao {
     @Query("SELECT * FROM session_exercises WHERE sessionId = :sessionId ORDER BY orderIndex ASC")
     suspend fun getExercisesForSessionSync(sessionId: Long): List<SessionExercise>
 
-    @Query("UPDATE session_exercises SET isCompleted = :isCompleted WHERE id = :id")
-    suspend fun setExerciseCompleted(id: Long, isCompleted: Boolean)
+    @Query("""
+        UPDATE session_exercises
+        SET isCompleted = :isCompleted,
+            isSkipped = CASE WHEN :isCompleted THEN 0 ELSE isSkipped END
+        WHERE id = :id
+    """)
+    suspend fun setExerciseCompleted(id: Long, isCompleted: Boolean): Int
 
-    @Query("UPDATE session_exercises SET isSkipped = :isSkipped WHERE id = :id")
-    suspend fun setExerciseSkipped(id: Long, isSkipped: Boolean)
+    @Query("""
+        UPDATE session_exercises
+        SET isSkipped = :isSkipped,
+            isCompleted = CASE WHEN :isSkipped THEN 0 ELSE isCompleted END
+        WHERE id = :id
+    """)
+    suspend fun setExerciseSkipped(id: Long, isSkipped: Boolean): Int
 
     // Set logs
     @Insert(onConflict = OnConflictStrategy.REPLACE)

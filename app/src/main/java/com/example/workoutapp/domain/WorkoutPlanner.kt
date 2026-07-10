@@ -18,12 +18,12 @@ import com.example.workoutapp.data.repository.EquipmentRepository
 import com.example.workoutapp.data.repository.MLFeedbackRepository
 import com.example.workoutapp.data.repository.SessionExerciseConfig
 import com.example.workoutapp.data.repository.UserGoalRepository
+import com.example.workoutapp.data.repository.WorkoutSessionCompletionInput
 import com.example.workoutapp.data.repository.WorkoutSessionRepository
 import com.example.workoutapp.domain.ml.WorkoutRecommender
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.ceil
@@ -229,68 +229,15 @@ class WorkoutPlanner @Inject constructor(
     suspend fun completeWorkout(
         sessionId: Long,
         completionInput: WorkoutCompletionInput
-    ) {
-        val existingSession = sessionRepository.getSessionById(sessionId) ?: return
-        val sessionExercises = sessionRepository.getExercisesForSessionSync(sessionId)
-        val completedExercises = sessionExercises.filter { it.isCompleted && !it.isSkipped }
-
-        val durationMinutes = existingSession.startedAt
-            ?.let { startedAt ->
-                max(
-                    1,
-                    TimeUnit.MILLISECONDS.toMinutes(System.currentTimeMillis() - startedAt).toInt()
-                )
-            }
-            ?: existingSession.targetDurationMinutes
-
-        sessionRepository.completeSession(sessionId, durationMinutes)
-
-        val completedSession = sessionRepository.getSessionById(sessionId)?.copy(
+    ) = sessionRepository.completeWorkout(
+        sessionId = sessionId,
+        input = WorkoutSessionCompletionInput(
             perceivedDifficulty = completionInput.perceivedDifficulty,
             energyLevel = completionInput.energyLevel,
             satisfactionRating = completionInput.satisfactionRating,
-            postSessionNotes = completionInput.notes,
-            updatedAt = System.currentTimeMillis()
-        ) ?: return
-        sessionRepository.updateSession(completedSession)
-
-        completedExercises.forEach { sessionExercise ->
-            exerciseRepository.markExercisePerformed(sessionExercise.exerciseId)
-        }
-
-        val categoryFrequency = linkedMapOf<WorkoutCategory, Int>()
-        completedExercises.forEach { sessionExercise ->
-            exerciseRepository.getExerciseCategories(sessionExercise.exerciseId)
-                .filter { it != WorkoutCategory.CUSTOM }
-                .forEach { category ->
-                    categoryFrequency[category] = (categoryFrequency[category] ?: 0) + 1
-                }
-        }
-
-        val totalAssignments = categoryFrequency.values.sum().coerceAtLeast(1)
-        categoryFrequency.forEach { (category, count) ->
-            userGoalRepository.recordCategoryTraining(category)
-            val minutes = (durationMinutes.toFloat() * count / totalAssignments).roundToInt().coerceAtLeast(1)
-            userGoalRepository.addCategoryTrainingMinutes(category, minutes)
-        }
-
-        userGoalRepository.recalculateDaysSinceLastTrained()
-
-        // Record ML feedback for learning
-        val completedIds = completedExercises.map { it.exerciseId }.toSet()
-        val skippedIds = sessionExercises.filter { it.isSkipped }.map { it.exerciseId }.toSet()
-        mlFeedbackRepository.recordWorkoutCompletion(
-            sessionId = sessionId,
-            completedExerciseIds = completedIds,
-            skippedExerciseIds = skippedIds,
-            perceivedDifficulty = completionInput.perceivedDifficulty,
-            satisfactionRating = completionInput.satisfactionRating
+            notes = completionInput.notes
         )
-
-        // Update cached preference scores periodically
-        val allExerciseIds = sessionExercises.map { it.exerciseId }
-        mlFeedbackRepository.cachePreferenceScores(allExerciseIds)
-    }
+    )
 }
 
 private fun Difficulty.toMlDifficultyLevel(): Int = level.coerceIn(1, 5)

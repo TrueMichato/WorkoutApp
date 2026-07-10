@@ -21,12 +21,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.workoutapp.data.model.*
+import com.example.workoutapp.ui.test.TestTags
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -65,6 +67,7 @@ fun AddEditExerciseScreen(
     }
 
     Scaffold(
+        modifier = Modifier.testTag(TestTags.AddEditExercise.Screen),
         topBar = {
             TopAppBar(
                 title = { Text(if (isEditing) "Edit Exercise" else "Add Exercise") },
@@ -76,7 +79,8 @@ fun AddEditExerciseScreen(
                 actions = {
                     TextButton(
                         onClick = { viewModel.saveExercise() },
-                        enabled = uiState.name.isNotBlank() && !uiState.isSaving
+                        enabled = uiState.name.isNotBlank() && !uiState.isSaving,
+                        modifier = Modifier.testTag(TestTags.AddEditExercise.SaveButton)
                     ) {
                         if (uiState.isSaving) {
                             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -105,7 +109,9 @@ fun AddEditExerciseScreen(
                 value = uiState.name,
                 onValueChange = viewModel::updateName,
                 label = { Text("Exercise Name *") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(TestTags.AddEditExercise.NameField),
                 singleLine = true,
                 isError = uiState.nameError != null,
                 supportingText = uiState.nameError?.let { { Text(it) } }

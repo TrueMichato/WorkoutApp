@@ -13,6 +13,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -20,6 +23,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.workoutapp.data.model.WorkoutSession
 import com.example.workoutapp.domain.DashboardAnalytics
+import com.example.workoutapp.ui.test.TestTags
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -36,7 +40,11 @@ fun DashboardScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
+    val balanceStatus = uiState.balanceStatus
+    val hasBalanceBaseline = balanceStatus is DashboardAnalytics.BalanceStatus.Ready
+
     Scaffold(
+        modifier = Modifier.testTag(TestTags.Dashboard.Screen),
         topBar = {
             TopAppBar(
                 title = { Text("Workout Brain", fontWeight = FontWeight.Bold) },
@@ -55,7 +63,10 @@ fun DashboardScreen(
         }
     ) { paddingValues ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(paddingValues),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .testTag(TestTags.Dashboard.ContentList),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -100,18 +111,28 @@ fun DashboardScreen(
             }
 
             // ── Balance Score ────────────────────────────────────────────
-            if (uiState.balanceScore >= 0) {
-                item { BalanceScoreCard(uiState.balanceScore) }
+            when (balanceStatus) {
+                is DashboardAnalytics.BalanceStatus.BuildingBaseline -> {
+                    item {
+                        BalanceBaselineCard(
+                            progress = balanceStatus.progress,
+                            onGenerateWorkout = onNavigateToGenerateWorkout
+                        )
+                    }
+                }
+                is DashboardAnalytics.BalanceStatus.Ready -> {
+                    item { BalanceScoreCard(balanceStatus.score) }
+                }
             }
 
             // ── Category Balance Bars ────────────────────────────────────
-            if (uiState.categoryBalances.isNotEmpty()) {
+            if (hasBalanceBaseline && uiState.categoryBalances.isNotEmpty()) {
                 item { CategoryBalanceBarsCard(uiState.categoryBalances, onNavigateToWorkout) }
             }
 
             // ── This-Week Summary ────────────────────────────────────────
             uiState.thisWeekSummary?.let { summary ->
-                item { ThisWeekSummaryCard(summary) }
+                item { ThisWeekSummaryCard(summary, showMissedCategories = hasBalanceBaseline) }
             }
 
             // ── Weekly Trend Mini-Chart ──────────────────────────────────
@@ -214,7 +235,15 @@ private fun BalanceScoreCard(score: Int) {
         else -> "Very Unbalanced"
     }
 
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+    val semanticSummary = "Training balance score $score out of 100. $label. " +
+        "Based on established category rotation history."
+
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(TestTags.Dashboard.BalanceScoreCard)
+            .semantics { contentDescription = semanticSummary }
+    ) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             // Circular score indicator
             Box(contentAlignment = Alignment.Center) {
@@ -228,10 +257,93 @@ private fun BalanceScoreCard(score: Int) {
                 Text("$score", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = scoreColor)
             }
             Spacer(Modifier.width(16.dp))
-            Column {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text("Training Balance", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 Text(label, style = MaterialTheme.typography.bodyMedium, color = scoreColor)
-                Text("Score based on category rotation", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "Score based on established category rotation",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BalanceBaselineCard(
+    progress: DashboardAnalytics.BalanceBaselineProgress,
+    onGenerateWorkout: () -> Unit
+) {
+    val semanticSummary = "Training balance baseline is still learning. " +
+        "${progress.trainedCategories} of ${progress.requiredCategories} categories and " +
+        "${progress.totalCategorySessions} of ${progress.requiredTotalSessions} category sessions logged. " +
+        "Generate a workout to add more history."
+
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(TestTags.Dashboard.BalanceBaselineCard)
+            .semantics { contentDescription = semanticSummary },
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Insights,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        "Learning your baseline",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Text(
+                        "Workout Brain needs a little history before it can score training balance.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+            }
+            Text(
+                "Baseline starts after ${progress.requiredCategories} trained categories and " +
+                    "${progress.requiredTotalSessions} logged category sessions.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+            LinearProgressIndicator(
+                progress = {
+                    minOf(
+                        progress.trainedCategories.toFloat() / progress.requiredCategories,
+                        progress.totalCategorySessions.toFloat() / progress.requiredTotalSessions
+                    ).coerceIn(0f, 1f)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+            Text(
+                "${progress.trainedCategories}/${progress.requiredCategories} categories • " +
+                    "${progress.totalCategorySessions}/${progress.requiredTotalSessions} sessions",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+            Button(
+                onClick = onGenerateWorkout,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(TestTags.Dashboard.GenerateWorkoutButton)
+            ) {
+                Text("Generate Workout")
             }
         }
     }
@@ -241,13 +353,22 @@ private fun BalanceScoreCard(score: Int) {
 
 @Composable
 private fun CategoryBalanceBarsCard(balances: List<DashboardAnalytics.CategoryBalance>, onViewDetails: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    val visibleBalances = balances.take(8)
+    val weakest = visibleBalances.firstOrNull()?.category?.displayName ?: "no categories"
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics {
+                contentDescription = "Category distribution chart showing ${visibleBalances.size} categories. " +
+                    "Lowest current balance: $weakest."
+            }
+    ) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Category Distribution", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 TextButton(onClick = onViewDetails) { Text("Details") }
             }
-            balances.take(8).forEach { balance ->
+            visibleBalances.forEach { balance ->
                 CategoryBalanceBar(balance)
             }
         }
@@ -264,24 +385,39 @@ private fun CategoryBalanceBar(balance: DashboardAnalytics.CategoryBalance) {
     }
     val dayLabel = if (balance.daysSinceLast >= 999) "Never" else "${balance.daysSinceLast}d ago"
 
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(balance.category.displayName, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(80.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .semantics {
+                contentDescription = "${balance.category.displayName}: ${(pct * 100).toInt()} percent of target, $dayLabel."
+            },
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                balance.category.displayName,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.weight(1f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(dayLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Box(
-            Modifier.weight(1f).height(12.dp).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+            Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             Box(
                 Modifier.fillMaxHeight().fillMaxWidth(fraction = (pct / 1.5f).coerceIn(0f, 1f)).clip(RoundedCornerShape(6.dp)).background(barColor)
             )
         }
-        Spacer(Modifier.width(8.dp))
-        Text(dayLabel, style = MaterialTheme.typography.labelSmall, modifier = Modifier.width(48.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 // ── This-Week Summary ────────────────────────────────────────────────
 
 @Composable
-private fun ThisWeekSummaryCard(summary: DashboardAnalytics.ThisWeekSummary) {
+private fun ThisWeekSummaryCard(summary: DashboardAnalytics.ThisWeekSummary, showMissedCategories: Boolean) {
     OutlinedCard(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("This Week", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -299,7 +435,7 @@ private fun ThisWeekSummaryCard(summary: DashboardAnalytics.ThisWeekSummary) {
                     Text("Categories", style = MaterialTheme.typography.bodySmall)
                 }
             }
-            if (summary.categoriesMissed.isNotEmpty()) {
+            if (showMissedCategories && summary.categoriesMissed.isNotEmpty()) {
                 Text("Not yet trained: ${summary.categoriesMissed.joinToString { it.displayName }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -310,11 +446,19 @@ private fun ThisWeekSummaryCard(summary: DashboardAnalytics.ThisWeekSummary) {
 
 @Composable
 private fun WeeklyTrendCard(trend: List<DashboardAnalytics.WeeklyTrend>) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    val totalSessions = trend.sumOf { it.sessionCount }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics {
+                contentDescription = "Weekly activity chart for ${trend.size} weeks. " +
+                    "$totalSessions completed sessions shown."
+            }
+    ) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Weekly Activity", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             val maxSessions = trend.maxOf { it.sessionCount }.coerceAtLeast(1)
-            Row(Modifier.fillMaxWidth().height(80.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Bottom) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 112.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Bottom) {
                 trend.forEach { week ->
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
                         Text("${week.sessionCount}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
@@ -382,7 +526,14 @@ private fun QuickActionButton(modifier: Modifier, icon: androidx.compose.ui.grap
 
 @Composable
 private fun EmptyRecentWorkoutsCard() {
-    Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics {
+                contentDescription = "No recent workouts yet. Start your first workout to build history."
+            },
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
         Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Icon(Icons.Default.FitnessCenter, null, Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)

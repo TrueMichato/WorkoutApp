@@ -80,9 +80,9 @@ private class FakeUserGoalDao(
 
     override fun getCategoryStatsByNeglect(): Flow<List<CategoryStats>> = flowOf(emptyList())
 
-    override suspend fun recordCategoryTraining(category: WorkoutCategory, timestamp: Long) = Unit
+    override suspend fun recordCategoryTraining(category: WorkoutCategory, timestamp: Long): Int = 1
 
-    override suspend fun addCategoryMinutes(category: WorkoutCategory, minutes: Int, timestamp: Long) = Unit
+    override suspend fun addCategoryMinutes(category: WorkoutCategory, minutes: Int, timestamp: Long): Int = 1
 
     override suspend fun recalculateDaysSinceLastTrained(now: Long) = Unit
 }
