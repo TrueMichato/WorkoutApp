@@ -14,7 +14,7 @@ class DashboardAnalyticsTest {
     @Test
     fun balanceScore_allCategoriesRecentlyTrained_returnsHighScore() {
         val stats = WorkoutCategory.rotationCategories().map {
-            CategoryStats(category = it, daysSinceLastTrained = 1)
+            CategoryStats(category = it, totalSessions = 1, daysSinceLastTrained = 1)
         }
         val score = DashboardAnalytics.balanceScore(stats)
         assertTrue("Score should be >= 80 when all trained recently, was $score", score >= 80)
@@ -30,19 +30,54 @@ class DashboardAnalyticsTest {
     }
 
     @Test
-    fun balanceScore_emptyStats_treatsAsMaxNeglect() {
-        val score = DashboardAnalytics.balanceScore(emptyList())
-        assertEquals(0, score)
+    fun balanceStatus_emptyStats_buildsBaselineWithoutNumericScore() {
+        val status = DashboardAnalytics.balanceStatus(emptyList())
+
+        assertTrue(status is DashboardAnalytics.BalanceStatus.BuildingBaseline)
+        assertEquals(0, status.progress.trainedCategories)
+        assertEquals(0, status.progress.totalCategorySessions)
+        assertFalse(status.progress.isReady)
     }
 
     @Test
     fun balanceScore_mixedRecency_returnsMidRange() {
         val categories = WorkoutCategory.rotationCategories()
         val stats = categories.mapIndexed { i, cat ->
-            CategoryStats(category = cat, daysSinceLastTrained = if (i % 2 == 0) 2 else 100)
+            CategoryStats(category = cat, totalSessions = 1, daysSinceLastTrained = if (i % 2 == 0) 2 else 100)
         }
         val score = DashboardAnalytics.balanceScore(stats)
         assertTrue("Mixed score should be between 20 and 80, was $score", score in 20..80)
+    }
+
+    @Test
+    fun balanceStatus_partialHistory_buildsBaselineWithoutNumericScore() {
+        val stats = listOf(
+            CategoryStats(category = WorkoutCategory.STRENGTH, totalSessions = 2, daysSinceLastTrained = 1),
+            CategoryStats(category = WorkoutCategory.MOBILITY, totalSessions = 1, daysSinceLastTrained = 2)
+        )
+
+        val status = DashboardAnalytics.balanceStatus(stats)
+
+        assertTrue(status is DashboardAnalytics.BalanceStatus.BuildingBaseline)
+        assertEquals(2, status.progress.trainedCategories)
+        assertEquals(3, status.progress.totalCategorySessions)
+        assertFalse(status.progress.isReady)
+    }
+
+    @Test
+    fun balanceStatus_establishedHistory_returnsNumericScore() {
+        val stats = listOf(
+            CategoryStats(category = WorkoutCategory.STRENGTH, totalSessions = 2, daysSinceLastTrained = 1),
+            CategoryStats(category = WorkoutCategory.MOBILITY, totalSessions = 1, daysSinceLastTrained = 2),
+            CategoryStats(category = WorkoutCategory.ENDURANCE, totalSessions = 1, daysSinceLastTrained = 3)
+        )
+
+        val status = DashboardAnalytics.balanceStatus(stats)
+
+        assertTrue(status is DashboardAnalytics.BalanceStatus.Ready)
+        assertEquals(3, status.progress.trainedCategories)
+        assertEquals(4, status.progress.totalCategorySessions)
+        assertTrue((status as DashboardAnalytics.BalanceStatus.Ready).score in 0..100)
     }
 
     // ── Category balances ────────────────────────────────────────────
@@ -139,13 +174,45 @@ class DashboardAnalyticsTest {
     fun nextRecommendation_pendingPt_prioritizesPt() {
         val recommendation = DashboardAnalytics.nextRecommendation(
             pendingPTRoutineCount = 2,
-            balanceScore = 90,
+            balanceStatus = DashboardAnalytics.BalanceStatus.Ready(
+                score = 90,
+                progress = establishedProgress()
+            ),
             categoryBalances = emptyList(),
             neglectedExercises = emptyList()
         )
 
         assertEquals(DashboardAnalytics.RecommendationAction.OPEN_PT, recommendation.action)
         assertTrue(recommendation.message.contains("physical therapy", ignoreCase = true))
+    }
+
+    @Test
+    fun nextRecommendation_buildingBaseline_pointsToGeneratorWithoutNeglectWarning() {
+        val balances = listOf(
+            DashboardAnalytics.CategoryBalance(
+                category = WorkoutCategory.MOBILITY,
+                actualSessions = 0,
+                targetSessionsPerWeek = 1.2f,
+                daysSinceLast = Int.MAX_VALUE,
+                balancePct = 0f
+            )
+        )
+
+        val recommendation = DashboardAnalytics.nextRecommendation(
+            pendingPTRoutineCount = 0,
+            balanceStatus = DashboardAnalytics.BalanceStatus.BuildingBaseline(
+                DashboardAnalytics.BalanceBaselineProgress(
+                    trainedCategories = 0,
+                    totalCategorySessions = 0
+                )
+            ),
+            categoryBalances = balances,
+            neglectedExercises = emptyList()
+        )
+
+        assertEquals(DashboardAnalytics.RecommendationAction.GENERATE_WORKOUT, recommendation.action)
+        assertTrue(recommendation.message.contains("learn", ignoreCase = true))
+        assertFalse(recommendation.message.contains("undertrained", ignoreCase = true))
     }
 
     @Test
@@ -161,7 +228,10 @@ class DashboardAnalyticsTest {
         )
         val recommendation = DashboardAnalytics.nextRecommendation(
             pendingPTRoutineCount = 0,
-            balanceScore = 40,
+            balanceStatus = DashboardAnalytics.BalanceStatus.Ready(
+                score = 40,
+                progress = establishedProgress()
+            ),
             categoryBalances = balances,
             neglectedExercises = emptyList()
         )
@@ -169,4 +239,10 @@ class DashboardAnalyticsTest {
         assertEquals(DashboardAnalytics.RecommendationAction.GENERATE_WORKOUT, recommendation.action)
         assertTrue(recommendation.message.contains("Mobility", ignoreCase = true))
     }
+
+    private fun establishedProgress(): DashboardAnalytics.BalanceBaselineProgress =
+        DashboardAnalytics.BalanceBaselineProgress(
+            trainedCategories = DashboardAnalytics.MIN_BASELINE_TRAINED_CATEGORIES,
+            totalCategorySessions = DashboardAnalytics.MIN_BASELINE_TOTAL_CATEGORY_SESSIONS
+        )
 }
