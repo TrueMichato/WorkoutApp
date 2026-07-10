@@ -103,6 +103,7 @@ class WorkoutViewModel @Inject constructor(
     private val _previewDraft = MutableStateFlow<WorkoutPlanDraft?>(null)
     private val _isSavingPlan = MutableStateFlow(false)
     private val _planSaveMessage = MutableStateFlow<String?>(null)
+    private val _lastFailedSavePlanInput = MutableStateFlow<SaveWorkoutPlanTemplateInput?>(null)
 
     // --- Active workout state ---
     private val _activeSessionId = MutableStateFlow<Long?>(null)
@@ -155,6 +156,7 @@ class WorkoutViewModel @Inject constructor(
         equipmentRepository.getAllLocations(),
         equipmentRepository.getDefaultLocationFlow(),
         userGoalRepository.getUserGoalFlow(),
+        userGoalRepository.hasCustomizedProfileFlow(),
         _selectedLocationId,
         _durationMinutes,
         _excludedPreviewExerciseIds
@@ -162,14 +164,18 @@ class WorkoutViewModel @Inject constructor(
         @Suppress("UNCHECKED_CAST")
         val locations = args[0] as List<EquipmentLocation>
         val defaultLocation = args[1] as EquipmentLocation?
-        // A null saved goal means the user has never saved one; fall back to UserGoal()'s neutral
-        // defaults but keep the raw nullability so the UI can be honest about "not personalized yet".
+        // A saved UserGoal row exists for every install (the database seeds a neutral
+        // UserGoal() row on first launch), so its mere presence is never proof the user made a
+        // choice. hasCustomizedProfile is the durable, DataStore-backed signal set only from the
+        // real Settings save flow (setTrainingPhase/setCategoryWeights) - that's what drives the
+        // "personalized vs. neutral defaults" messaging honestly.
         val savedUserGoal = args[2] as UserGoal?
+        val hasCustomizedProfile = args[3] as Boolean
         val userGoal = savedUserGoal ?: UserGoal()
-        val selectedLocationId = args[3] as Long?
-        val durationMinutes = args[4] as Int?
+        val selectedLocationId = args[4] as Long?
+        val durationMinutes = args[5] as Int?
         @Suppress("UNCHECKED_CAST")
-        val excludedPreviewExerciseIds = args[5] as Set<Long>
+        val excludedPreviewExerciseIds = args[6] as Set<Long>
 
         GeneratorBaseState(
             locations = locations,
@@ -178,7 +184,7 @@ class WorkoutViewModel @Inject constructor(
             durationMinutes = durationMinutes ?: userGoal.preferredSessionDurationMinutes,
             currentPhase = userGoal.currentPhase,
             excludedPreviewExerciseIds = excludedPreviewExerciseIds,
-            hasSavedProfile = savedUserGoal != null
+            hasSavedProfile = hasCustomizedProfile
         )
     }
 
@@ -350,13 +356,21 @@ class WorkoutViewModel @Inject constructor(
         when (_lastFailedGeneratorAction.value) {
             GeneratorAction.PREVIEW -> previewWorkout()
             GeneratorAction.GENERATE -> generateWorkout()
+            GeneratorAction.SAVE_PLAN -> {
+                val input = _lastFailedSavePlanInput.value
+                if (input != null) savePreviewAsPlan(input.name, input.description)
+            }
             null -> Unit
         }
     }
 
     fun clearGeneratedSession() { _generatedSessionId.value = null }
     fun clearCompletedWorkout() { _completedWorkoutId.value = null }
-    fun clearGeneratorError() { _generationError.value = null; _lastFailedGeneratorAction.value = null }
+    fun clearGeneratorError() {
+        _generationError.value = null
+        _lastFailedGeneratorAction.value = null
+        _lastFailedSavePlanInput.value = null
+    }
     fun clearActiveWorkoutError() { _activeWorkoutError.value = null }
     fun clearPlanSaveMessage() { _planSaveMessage.value = null }
 
@@ -575,6 +589,7 @@ class WorkoutViewModel @Inject constructor(
                 _previewFeedbackSessionId.value = -System.currentTimeMillis()
             }
             _isPreviewing.value = true; _generationError.value = null; _lastFailedGeneratorAction.value = null
+            _lastFailedSavePlanInput.value = null
             try { _previewDraft.value = workoutPlanner.previewWorkout(currentGenerationParams()) }
             catch (e: Exception) {
                 _previewDraft.value = null
@@ -618,6 +633,7 @@ class WorkoutViewModel @Inject constructor(
         if (!canDispatchGeneratorAction(_isGenerating.value, _isPreviewing.value, _isSavingPlan.value)) return
         viewModelScope.launch {
             _isGenerating.value = true; _generationError.value = null; _lastFailedGeneratorAction.value = null
+            _lastFailedSavePlanInput.value = null
             try {
                 val result = workoutPlanner.generateAndSaveWorkout(currentGenerationParams())
                 _previewDraft.value = result.draft; _generatedSessionId.value = result.sessionId
@@ -630,19 +646,32 @@ class WorkoutViewModel @Inject constructor(
     }
 
     fun savePreviewAsPlan(name: String, description: String = "") {
+        // Same double-dispatch guard as previewWorkout()/generateWorkout(): a double-tap that
+        // lands before recomposition disables the Save button can't fire a second save, and a
+        // retry from the error card can't overlap with the dialog's own in-flight save.
+        if (!canDispatchGeneratorAction(_isGenerating.value, _isPreviewing.value, _isSavingPlan.value)) return
         val draft = _previewDraft.value ?: return
+        val input = SaveWorkoutPlanTemplateInput(name = name, description = description)
         viewModelScope.launch {
             _isSavingPlan.value = true
             _planSaveMessage.value = null
+            _generationError.value = null
+            _lastFailedGeneratorAction.value = null
             try {
                 workoutPlanner.saveDraftAsTemplate(
                     draft = draft,
-                    input = SaveWorkoutPlanTemplateInput(name = name, description = description),
+                    input = input,
                     phase = generatorUiState.value.currentPhase
                 )
                 _planSaveMessage.value = "Saved \"${name.ifBlank { draft.session.name }}\" as a reusable plan."
+                _lastFailedSavePlanInput.value = null
             } catch (e: Exception) {
+                // Preserve the attempted name/description so "Try again" on the error card can
+                // re-invoke the save with the exact same input, even after the dialog (which only
+                // holds this in local remember state) has been dismissed.
+                _lastFailedSavePlanInput.value = input
                 _generationError.value = e.message ?: "Failed to save workout plan."
+                _lastFailedGeneratorAction.value = GeneratorAction.SAVE_PLAN
             } finally {
                 _isSavingPlan.value = false
             }
@@ -874,6 +903,7 @@ class WorkoutViewModel @Inject constructor(
         _isPreviewing.value = true
         _generationError.value = null
         _lastFailedGeneratorAction.value = null
+        _lastFailedSavePlanInput.value = null
         try {
             _previewDraft.value = workoutPlanner.previewWorkout(currentGenerationParams())
         } catch (e: Exception) {
@@ -889,6 +919,7 @@ class WorkoutViewModel @Inject constructor(
         _previewDraft.value = null
         _generationError.value = null
         _lastFailedGeneratorAction.value = null
+        _lastFailedSavePlanInput.value = null
         _excludedPreviewExerciseIds.value = emptySet()
         _previewFeedbackSessionId.value = null
     }
@@ -1050,7 +1081,7 @@ class WorkoutViewModel @Inject constructor(
             emptySet()
         }
 
-    private companion object {
+    internal companion object {
         const val KEY_DRAFTS_SESSION_ID = "activeWorkout_draftsSessionId"
         const val KEY_DRAFTS_JSON = "activeWorkout_draftsJson"
         const val KEY_FOCUSED_EXERCISE_ID = "activeWorkout_focusedExerciseId"
@@ -1062,7 +1093,7 @@ class WorkoutViewModel @Inject constructor(
 }
 
 /** Which generator call last failed, so the error surface's retry action can re-run the right one. */
-enum class GeneratorAction { PREVIEW, GENERATE }
+enum class GeneratorAction { PREVIEW, GENERATE, SAVE_PLAN }
 
 // ========== Internal state helpers ==========
 private data class GeneratorBaseState(

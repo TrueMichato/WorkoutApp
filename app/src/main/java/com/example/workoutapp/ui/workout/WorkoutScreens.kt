@@ -404,6 +404,7 @@ fun WorkoutGeneratorScreen(
                     item {
                         GeneratorErrorCard(
                             message = error,
+                            canRetry = uiState.lastFailedAction != null,
                             onRetry = viewModel::retryLastGeneratorAction,
                             onDismiss = viewModel::clearGeneratorError
                         )
@@ -660,6 +661,7 @@ private fun LazyListScope.generatorAdvancedSetupSection(
 @Composable
 private fun GeneratorErrorCard(
     message: String,
+    canRetry: Boolean,
     onRetry: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -676,13 +678,17 @@ private fun GeneratorErrorCard(
         ) {
             Text(message, color = MaterialTheme.colorScheme.onErrorContainer)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(
-                    onClick = onRetry,
-                    modifier = Modifier
-                        .heightIn(min = 48.dp)
-                        .testTag(TestTags.WorkoutGenerator.ErrorRetryButton)
-                ) {
-                    Text("Try again")
+                // Only render "Try again" when there's an actual action to retry - a failure with
+                // no associated retryable action must never show a dead/no-op CTA.
+                if (canRetry) {
+                    TextButton(
+                        onClick = onRetry,
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag(TestTags.WorkoutGenerator.ErrorRetryButton)
+                    ) {
+                        Text("Try again")
+                    }
                 }
                 TextButton(
                     onClick = onDismiss,
