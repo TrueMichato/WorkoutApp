@@ -71,6 +71,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.workoutapp.data.model.ExerciseCompletionState
 import com.example.workoutapp.data.model.SessionStatus
 import com.example.workoutapp.data.model.SetLog
 import com.example.workoutapp.data.model.TimeSlot
@@ -843,7 +844,9 @@ fun ActiveWorkoutScreen(
             )
             else -> {
                 val session = requireNotNull(uiState.session)
-                val completedCount = uiState.exercises.count { it.sessionExercise.isCompleted }
+                val completedCount = uiState.exercises.count { it.completionState == ExerciseCompletionState.COMPLETED }
+                val skippedCount = uiState.exercises.count { it.completionState == ExerciseCompletionState.SKIPPED }
+                val loggedCount = uiState.exercises.count { it.completionState == ExerciseCompletionState.LOGGED }
                 val progress = if (uiState.exercises.isEmpty()) 0f else completedCount / uiState.exercises.size.toFloat()
 
                 LazyColumn(
@@ -882,7 +885,7 @@ fun ActiveWorkoutScreen(
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Text(
-                                    "$completedCount / ${uiState.exercises.size} exercises completed",
+                                   "$completedCount done • $skippedCount skipped • $loggedCount logged only",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -894,6 +897,23 @@ fun ActiveWorkoutScreen(
                                         Text("Start workout")
                                     }
                                 }
+                            }
+                        }
+                    }
+
+                    uiState.error?.let { error ->
+                        item {
+                            Surface(
+                                color = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                shape = MaterialTheme.shapes.medium,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = error,
+                                    modifier = Modifier.padding(16.dp),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
                             }
                         }
                     }
@@ -913,7 +933,7 @@ fun ActiveWorkoutScreen(
                             onDraftRpeChanged = { viewModel.updateSetDraftRpe(item.sessionExercise.id, it) },
                             onDraftNotesChanged = { viewModel.updateSetDraftNotes(item.sessionExercise.id, it) },
                             onSaveSet = { viewModel.saveSetLog(item) },
-                            onDeleteSet = { setLog -> viewModel.deleteSetLog(item, setLog) }
+                            onDeleteSet = viewModel::deleteSetLog
                         )
                     }
 
@@ -1133,6 +1153,11 @@ private fun SessionExerciseCard(
                 "${item.sessionExercise.plannedSets} sets • ${item.sessionExercise.plannedReps} • ${item.sessionExercise.plannedRestSeconds}s rest",
                 style = MaterialTheme.typography.bodyMedium
             )
+            Text(
+                "Logging sets saves performance only. Tap Done when the exercise is finished, or Skip if you did not perform it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             val richPrescription = item.sessionExercise.prescriptionJson.toRichPrescriptionDataOrNull()
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Surface(
@@ -1153,6 +1178,19 @@ private fun SessionExerciseCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                AssistChip(
+                    onClick = {},
+                    label = {
+                        Text(
+                            when (item.completionState) {
+                                ExerciseCompletionState.NOT_STARTED -> "Not started"
+                                ExerciseCompletionState.LOGGED -> "${item.setLogs.size} set(s) logged"
+                                ExerciseCompletionState.COMPLETED -> "Done"
+                                ExerciseCompletionState.SKIPPED -> "Skipped"
+                            }
+                        )
+                    }
+                )
             }
             item.sessionExercise.notes.takeIf { it.isNotBlank() }?.let { note ->
                 Text(
@@ -1318,6 +1356,19 @@ private fun CompletionFeedbackCard(
                 placeholder = { Text("What felt good, bad, or worth repeating?") },
                 minLines = 3
             )
+            val finalStatusLabel = if (
+                uiState.exercises.isNotEmpty() &&
+                uiState.exercises.all { it.completionState == ExerciseCompletionState.COMPLETED }
+            ) {
+                "This will save a completed workout."
+            } else {
+                "This will save a partial workout; logged-only and skipped exercises will not count as completed."
+            }
+            Text(
+                finalStatusLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Button(
                 onClick = onCompleteWorkout,
                 modifier = Modifier.fillMaxWidth(),
@@ -1333,7 +1384,7 @@ private fun CompletionFeedbackCard(
                     Icon(Icons.Default.Check, null)
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(if (uiState.isCompleting) "Saving workout..." else "Complete Workout")
+                Text(if (uiState.isCompleting) "Saving workout..." else "Finish Workout")
             }
         }
     }

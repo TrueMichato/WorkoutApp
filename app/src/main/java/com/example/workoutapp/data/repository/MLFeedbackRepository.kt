@@ -71,6 +71,7 @@ class MLFeedbackRepository @Inject constructor(
         sessionId: Long,
         completedExerciseIds: Set<Long>,
         skippedExerciseIds: Set<Long>,
+        notCompletedExerciseIds: Set<Long> = emptySet(),
         perceivedDifficulty: Int?,
         satisfactionRating: Int?
     ) {
@@ -79,6 +80,7 @@ class MLFeedbackRepository @Inject constructor(
             val newAction = when (event.exerciseId) {
                 in completedExerciseIds -> FeedbackAction.COMPLETED
                 in skippedExerciseIds -> FeedbackAction.SKIPPED
+                in notCompletedExerciseIds -> FeedbackAction.NOT_COMPLETED
                 else -> event.action // Keep existing action
             }
             mlFeedbackDao.updateEventOutcome(
@@ -222,4 +224,3 @@ class MLFeedbackRepository @Inject constructor(
         mlFeedbackDao.deleteEventsOlderThan(threshold)
     }
 }
-

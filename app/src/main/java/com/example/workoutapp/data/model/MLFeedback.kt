@@ -48,6 +48,7 @@ enum class FeedbackAction {
     REJECTED,           // User removed the exercise from the suggestion
     COMPLETED,          // User completed the exercise in the workout
     SKIPPED,            // User skipped the exercise during the workout
+    NOT_COMPLETED,      // User finished the workout without completing this exercise
     SWAPPED             // User replaced with a different exercise
 }
 
@@ -95,4 +96,3 @@ data class MLFeatureVector(
         const val FEATURE_COUNT = 10
     }
 }
-
