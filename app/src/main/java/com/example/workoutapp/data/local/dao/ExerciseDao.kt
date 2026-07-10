@@ -36,6 +36,9 @@ interface ExerciseDao {
     @Query("SELECT * FROM exercises ORDER BY name ASC")
     fun getAll(): Flow<List<Exercise>>
 
+    @Query("SELECT * FROM exercises ORDER BY name ASC")
+    suspend fun getAllSync(): List<Exercise>
+
     @Query("SELECT * FROM exercises WHERE isFavorite = 1 AND isArchived = 0 ORDER BY name ASC")
     fun getFavorites(): Flow<List<Exercise>>
 

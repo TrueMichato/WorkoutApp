@@ -25,6 +25,8 @@ class ExerciseRepository @Inject constructor(
 
     fun getAllExercises(): Flow<List<Exercise>> = exerciseDao.getAllActive()
 
+    suspend fun getAllExercisesIncludingArchived(): List<Exercise> = exerciseDao.getAllSync()
+
     fun getFavoriteExercises(): Flow<List<Exercise>> = exerciseDao.getFavorites()
 
     fun getRecentlyPerformed(limit: Int = 20): Flow<List<Exercise>> = exerciseDao.getRecentlyPerformed(limit)

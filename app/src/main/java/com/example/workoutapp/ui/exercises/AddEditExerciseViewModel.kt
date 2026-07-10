@@ -1,16 +1,21 @@
 package com.example.workoutapp.ui.exercises
 
 import android.net.Uri
-import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.workoutapp.data.local.MediaStorageException
+import com.example.workoutapp.data.local.MediaStorageManager
 import com.example.workoutapp.data.model.Difficulty
 import com.example.workoutapp.data.model.Equipment
 import com.example.workoutapp.data.model.Exercise
 import com.example.workoutapp.data.model.ExerciseProgrammingPreset
 import com.example.workoutapp.data.model.MuscleGroup
+import com.example.workoutapp.data.model.PersistedDataDecodeException
+import com.example.workoutapp.data.model.PersistedJsonIssue
 import com.example.workoutapp.data.model.TrainingPhase
 import com.example.workoutapp.data.model.WorkoutCategory
+import com.example.workoutapp.data.model.decodeTrainingPhasePresets
+import com.example.workoutapp.data.model.persistedJson
 import com.example.workoutapp.data.repository.EquipmentRepository
 import com.example.workoutapp.data.repository.ExerciseRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -20,16 +25,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import javax.inject.Inject
 
 @HiltViewModel
 class AddEditExerciseViewModel @Inject constructor(
     private val exerciseRepository: ExerciseRepository,
-    private val equipmentRepository: EquipmentRepository
+    private val equipmentRepository: EquipmentRepository,
+    private val mediaStorageManager: MediaStorageManager
 ) : ViewModel() {
-
-    private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 
     private val _uiState = MutableStateFlow(AddEditExerciseUiState())
     val uiState: StateFlow<AddEditExerciseUiState> = _uiState.asStateFlow()
@@ -62,23 +65,25 @@ class AddEditExerciseViewModel @Inject constructor(
                 equipmentRepository.getEquipmentById(id)
             }
 
+            val decodeIssues = mutableListOf<PersistedJsonIssue>()
             val localUris = try {
-                json.decodeFromString<List<String>>(exercise.localMediaUris).map { it.toUri() }
-            } catch (_: Exception) {
+                val result = mediaStorageManager.decodeLocalMediaUris(exercise.localMediaUris)
+                decodeIssues += result.issues
+                result.value
+            } catch (e: PersistedDataDecodeException) {
+                decodeIssues += PersistedJsonIssue(e.fieldName, e.rawValue, e.message ?: "Saved media could not be decoded.")
                 emptyList()
             }
 
-            val externalUrls = try {
-                json.decodeFromString<List<String>>(exercise.externalMediaUrls)
-            } catch (_: Exception) {
-                emptyList()
-            }
+            val externalUrlResult = mediaStorageManager.decodeExternalUrls(exercise.externalMediaUrls)
+            decodeIssues += externalUrlResult.issues
 
             val presets = mergePresetsWithDefaults(
                 encodedPresets = exercise.trainingPhasePresets,
                 defaultSets = exercise.defaultSets,
                 defaultReps = exercise.defaultReps,
-                defaultRestSeconds = exercise.defaultRestSeconds
+                defaultRestSeconds = exercise.defaultRestSeconds,
+                decodeIssues = decodeIssues
             )
             val balancedPreset = presets.getValue(TrainingPhase.BALANCED)
 
@@ -104,8 +109,12 @@ class AddEditExerciseViewModel @Inject constructor(
                     isCompound = exercise.isCompound,
                     isUnilateral = exercise.isUnilateral,
                     localMediaUris = localUris,
-                    externalUrls = externalUrls,
+                    externalUrls = externalUrlResult.value,
                     personalNotes = exercise.personalNotes,
+                    originalLocalMediaJson = exercise.localMediaUris,
+                    originalExternalMediaJson = exercise.externalMediaUrls,
+                    originalTrainingPhasePresetsJson = exercise.trainingPhasePresets,
+                    dataWarnings = decodeIssues.map { it.message },
                     isLoading = false
                 )
             }
@@ -213,7 +222,7 @@ class AddEditExerciseViewModel @Inject constructor(
             val updatedPresets = state.trainingPhasePresets.toMutableMap().apply {
                 this[TrainingPhase.BALANCED] = getValue(TrainingPhase.BALANCED).copy(setsText = resolved.toString())
             }
-            state.copy(defaultSets = resolved, trainingPhasePresets = updatedPresets, saveError = null)
+            state.copy(defaultSets = resolved, trainingPhasePresets = updatedPresets, presetsDirty = true, saveError = null)
         }
     }
 
@@ -222,7 +231,7 @@ class AddEditExerciseViewModel @Inject constructor(
             val updatedPresets = state.trainingPhasePresets.toMutableMap().apply {
                 this[TrainingPhase.BALANCED] = getValue(TrainingPhase.BALANCED).copy(repsText = reps)
             }
-            state.copy(defaultReps = reps, trainingPhasePresets = updatedPresets, saveError = null)
+            state.copy(defaultReps = reps, trainingPhasePresets = updatedPresets, presetsDirty = true, saveError = null)
         }
     }
 
@@ -232,7 +241,7 @@ class AddEditExerciseViewModel @Inject constructor(
             val updatedPresets = state.trainingPhasePresets.toMutableMap().apply {
                 this[TrainingPhase.BALANCED] = getValue(TrainingPhase.BALANCED).copy(restSeconds = resolved)
             }
-            state.copy(defaultRestSeconds = resolved, trainingPhasePresets = updatedPresets, saveError = null)
+            state.copy(defaultRestSeconds = resolved, trainingPhasePresets = updatedPresets, presetsDirty = true, saveError = null)
         }
     }
 
@@ -242,7 +251,7 @@ class AddEditExerciseViewModel @Inject constructor(
             val updatedPresets = state.trainingPhasePresets.toMutableMap().apply {
                 this[TrainingPhase.BALANCED] = getValue(TrainingPhase.BALANCED).copy(rounds = parsed)
             }
-            state.copy(defaultRounds = parsed, trainingPhasePresets = updatedPresets, saveError = null)
+            state.copy(defaultRounds = parsed, trainingPhasePresets = updatedPresets, presetsDirty = true, saveError = null)
         }
     }
 
@@ -252,7 +261,7 @@ class AddEditExerciseViewModel @Inject constructor(
             val updatedPresets = state.trainingPhasePresets.toMutableMap().apply {
                 this[TrainingPhase.BALANCED] = getValue(TrainingPhase.BALANCED).copy(durationSeconds = parsed)
             }
-            state.copy(defaultDurationSeconds = parsed, trainingPhasePresets = updatedPresets, saveError = null)
+            state.copy(defaultDurationSeconds = parsed, trainingPhasePresets = updatedPresets, presetsDirty = true, saveError = null)
         }
     }
 
@@ -261,7 +270,7 @@ class AddEditExerciseViewModel @Inject constructor(
             val updatedPresets = state.trainingPhasePresets.toMutableMap().apply {
                 this[TrainingPhase.BALANCED] = getValue(TrainingPhase.BALANCED).copy(tempo = value)
             }
-            state.copy(defaultTempo = value, trainingPhasePresets = updatedPresets, saveError = null)
+            state.copy(defaultTempo = value, trainingPhasePresets = updatedPresets, presetsDirty = true, saveError = null)
         }
     }
 
@@ -270,7 +279,7 @@ class AddEditExerciseViewModel @Inject constructor(
             val updatedPresets = state.trainingPhasePresets.toMutableMap().apply {
                 this[TrainingPhase.BALANCED] = getValue(TrainingPhase.BALANCED).copy(effortTarget = value)
             }
-            state.copy(defaultEffortTarget = value, trainingPhasePresets = updatedPresets, saveError = null)
+            state.copy(defaultEffortTarget = value, trainingPhasePresets = updatedPresets, presetsDirty = true, saveError = null)
         }
     }
 
@@ -296,7 +305,7 @@ class AddEditExerciseViewModel @Inject constructor(
             val updatedPresets = state.trainingPhasePresets.toMutableMap().apply {
                 this[phase] = (this[phase] ?: defaultPresetForPhase(phase, state.defaultSets, state.defaultReps, state.defaultRestSeconds)).transform()
             }
-            state.copy(trainingPhasePresets = updatedPresets, saveError = null)
+            state.copy(trainingPhasePresets = updatedPresets, presetsDirty = true, saveError = null)
         }
     }
 
@@ -309,21 +318,34 @@ class AddEditExerciseViewModel @Inject constructor(
     }
 
     fun addLocalMedia(uris: List<Uri>) {
-        _uiState.update { state -> state.copy(localMediaUris = state.localMediaUris + uris, saveError = null) }
+        _uiState.update { state ->
+            state.copy(
+                localMediaUris = state.localMediaUris + uris,
+                mediaDirty = true,
+                saveError = null
+            )
+        }
     }
 
     fun removeLocalMedia(uri: Uri) {
-        _uiState.update { state -> state.copy(localMediaUris = state.localMediaUris - uri, saveError = null) }
+        _uiState.update { state ->
+            state.copy(
+                localMediaUris = state.localMediaUris - uri,
+                removedLocalMediaUris = state.removedLocalMediaUris + uri,
+                mediaDirty = true,
+                saveError = null
+            )
+        }
     }
 
     fun addExternalUrl(url: String) {
         if (url.isNotBlank()) {
-            _uiState.update { state -> state.copy(externalUrls = state.externalUrls + url, saveError = null) }
+            _uiState.update { state -> state.copy(externalUrls = state.externalUrls + url, externalUrlsDirty = true, saveError = null) }
         }
     }
 
     fun removeExternalUrl(url: String) {
-        _uiState.update { state -> state.copy(externalUrls = state.externalUrls - url, saveError = null) }
+        _uiState.update { state -> state.copy(externalUrls = state.externalUrls - url, externalUrlsDirty = true, saveError = null) }
     }
 
     fun updatePersonalNotes(notes: String) {
@@ -343,11 +365,39 @@ class AddEditExerciseViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true, saveError = null) }
 
+            var copiedMediaUris: List<Uri> = emptyList()
             try {
-                val localMediaJson = json.encodeToString(state.localMediaUris.map { it.toString() })
-                val externalMediaJson = json.encodeToString(state.externalUrls)
+                val shouldPreserveRawMedia = state.originalLocalMediaJson != null &&
+                    state.localMediaUris.isEmpty() &&
+                    !state.mediaDirty &&
+                    state.dataWarnings.any { it.contains("media", ignoreCase = true) }
+                val ownedMediaUris = if (shouldPreserveRawMedia) {
+                    state.localMediaUris
+                } else {
+                    mediaStorageManager.copyIntoExerciseMedia(state.localMediaUris)
+                }
+                copiedMediaUris = ownedMediaUris.filterIndexed { index, uri ->
+                    val source = state.localMediaUris.getOrNull(index)
+                    source != null && uri != source
+                }
+                val localMediaJson = if (shouldPreserveRawMedia) {
+                    state.originalLocalMediaJson.orEmpty()
+                } else {
+                    persistedJson.encodeToString(ownedMediaUris.map { it.toString() })
+                }
+                val externalMediaJson = if (!state.externalUrlsDirty && state.originalExternalMediaJson != null && state.externalUrls.isEmpty()) {
+                    state.originalExternalMediaJson
+                } else {
+                    persistedJson.encodeToString(state.externalUrls)
+                }
                 val presetMap = state.trainingPhasePresets.mapKeys { it.key.name }
-                val presetJson = json.encodeToString(presetMap)
+                val presetJson = if (!state.presetsDirty && state.originalTrainingPhasePresetsJson != null &&
+                    state.dataWarnings.any { it.contains("programming", ignoreCase = true) }
+                ) {
+                    state.originalTrainingPhasePresetsJson
+                } else {
+                    persistedJson.encodeToString(presetMap)
+                }
                 val balancedPreset = state.trainingPhasePresets.getValue(TrainingPhase.BALANCED)
 
                 val exercise = Exercise(
@@ -387,8 +437,26 @@ class AddEditExerciseViewModel @Inject constructor(
                     )
                 }
 
+                if (state.removedLocalMediaUris.isNotEmpty()) {
+                    mediaStorageManager.deleteUnreferencedMedia(
+                        candidateUris = state.removedLocalMediaUris,
+                        allExercises = exerciseRepository.getAllExercisesIncludingArchived()
+                    )
+                }
+
                 _uiState.update { it.copy(isSaving = false, saveSuccess = true) }
-            } catch (e: Exception) {
+            } catch (e: MediaStorageException) {
+                mediaStorageManager.deleteOwnedMediaFiles(copiedMediaUris)
+                _uiState.update {
+                    it.copy(isSaving = false, saveError = e.message ?: "Failed to import selected media")
+                }
+            } catch (e: PersistedDataDecodeException) {
+                mediaStorageManager.deleteOwnedMediaFiles(copiedMediaUris)
+                _uiState.update {
+                    it.copy(isSaving = false, saveError = e.message ?: "Saved data could not be decoded")
+                }
+            } catch (e: IllegalStateException) {
+                mediaStorageManager.deleteOwnedMediaFiles(copiedMediaUris)
                 _uiState.update {
                     it.copy(isSaving = false, saveError = e.message ?: "Failed to save exercise")
                 }
@@ -400,18 +468,16 @@ class AddEditExerciseViewModel @Inject constructor(
         encodedPresets: String,
         defaultSets: Int,
         defaultReps: String,
-        defaultRestSeconds: Int
+        defaultRestSeconds: Int,
+        decodeIssues: MutableList<PersistedJsonIssue> = mutableListOf()
     ): Map<TrainingPhase, ExerciseProgrammingPreset> {
         val seeded = TrainingPhase.entries.associateWith {
             defaultPresetForPhase(it, defaultSets, defaultReps, defaultRestSeconds)
         }.toMutableMap()
-        val stored = try {
-            json.decodeFromString<Map<String, ExerciseProgrammingPreset>>(encodedPresets)
-        } catch (_: Exception) {
-            emptyMap()
-        }
-        stored.forEach { (phaseName, preset) ->
-            TrainingPhase.entries.find { it.name == phaseName }?.let { seeded[it] = preset }
+        val stored = decodeTrainingPhasePresets("exercise programming presets", encodedPresets)
+        decodeIssues += stored.issues
+        stored.value.forEach { (phase, preset) ->
+            seeded[phase] = preset
         }
         return seeded
     }
@@ -486,5 +552,13 @@ data class AddEditExerciseUiState(
     val isLoading: Boolean = false,
     val isSaving: Boolean = false,
     val saveSuccess: Boolean = false,
-    val saveError: String? = null
+    val saveError: String? = null,
+    val dataWarnings: List<String> = emptyList(),
+    val originalLocalMediaJson: String? = null,
+    val originalExternalMediaJson: String? = null,
+    val originalTrainingPhasePresetsJson: String? = null,
+    val mediaDirty: Boolean = false,
+    val externalUrlsDirty: Boolean = false,
+    val presetsDirty: Boolean = false,
+    val removedLocalMediaUris: List<Uri> = emptyList()
 )

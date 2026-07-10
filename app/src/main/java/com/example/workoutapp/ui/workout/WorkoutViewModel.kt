@@ -18,6 +18,8 @@ import com.example.workoutapp.data.model.WorkoutPlanTemplate
 import com.example.workoutapp.data.model.WorkoutPlanTemplateExercise
 import com.example.workoutapp.data.model.WorkoutPlanTemplateSummary
 import com.example.workoutapp.data.model.WorkoutSession
+import com.example.workoutapp.data.model.decodePersistedEnumNameList
+import com.example.workoutapp.data.model.persistedJson
 import com.example.workoutapp.data.model.resolveBalancedProgrammingPreset
 import com.example.workoutapp.data.model.toJson
 import com.example.workoutapp.data.model.toRichPrescriptionDataOrNull
@@ -50,7 +52,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -62,9 +63,6 @@ class WorkoutViewModel @Inject constructor(
     private val mlFeedbackRepository: MLFeedbackRepository,
     private val workoutPlanner: WorkoutPlanner
 ) : ViewModel() {
-    private val json = Json { ignoreUnknownKeys = true }
-
-
     // --- Generator state ---
     private val _selectedLocationId = MutableStateFlow<Long?>(null)
     private val _durationMinutes = MutableStateFlow<Int?>(null)
@@ -681,7 +679,7 @@ class WorkoutViewModel @Inject constructor(
             ?.let { ((System.currentTimeMillis() - it) / (24L * 60L * 60L * 1000L)).toInt() }
             ?: Int.MAX_VALUE
         val daysSinceCategory = userGoalRepository.getCategoryStats(category)?.daysSinceLastTrained ?: Int.MAX_VALUE
-        val weights = runCatching { userGoalRepository.getCategoryWeights() }.getOrDefault(emptyMap())
+        val weights = userGoalRepository.getCategoryWeights()
         
         val statsList = userGoalRepository.getAllCategoryStats().first()
         val balanceScore = DashboardAnalytics.balanceScore(statsList, weights)
@@ -792,7 +790,7 @@ class WorkoutViewModel @Inject constructor(
                     notes = snapshot.notes.trim(),
                     locationId = snapshot.selectedLocationId,
                     targetDurationMinutes = snapshot.durationMinutes,
-                    targetCategories = json.encodeToString(snapshot.selectedCategories.map { it.name }),
+                    targetCategories = persistedJson.encodeToString(snapshot.selectedCategories.map { it.name }),
                     scheduledTimeSlot = snapshot.selectedTimeSlot,
                     sourcePhase = snapshot.sourcePhase,
                     createdAt = if (snapshot.templateId == null) System.currentTimeMillis() else snapshot.createdAt,
@@ -856,12 +854,11 @@ class WorkoutViewModel @Inject constructor(
     private fun extractFirstInt(value: String): Int? = Regex("\\d+").find(value)?.value?.toIntOrNull()
 
     private fun parsePlanCategories(value: String): Set<WorkoutCategory> =
-        try {
-            json.decodeFromString<List<String>>(value)
-                .mapNotNull { raw -> WorkoutCategory.entries.firstOrNull { it.name == raw } }
-                .toSet()
-        } catch (_: Exception) {
-            emptySet()
+        decodePersistedEnumNameList<WorkoutCategory>("plan categories", value).let { result ->
+            if (result.hasIssues) {
+                throw IllegalStateException(result.issues.joinToString("\n") { it.message })
+            }
+            result.value.toSet()
         }
 }
 
@@ -1008,4 +1005,3 @@ private fun resolveEditorSetCount(setsText: String, fallback: Int): Int {
         else -> ((numbers.first() + numbers.last()) / 2).coerceIn(1, 20)
     }
 }
-

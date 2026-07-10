@@ -81,16 +81,21 @@ class DashboardViewModel @Inject constructor(
             userGoalRepository.recalculateDaysSinceLastTrained()
             userGoalRepository.getAllCategoryStats().collect { stats ->
                 val statsMap = stats.associate { it.category to it.daysSinceLastTrained }
-                val weights = try { userGoalRepository.getCategoryWeights() } catch (_: Exception) { emptyMap() }
-                val score = DashboardAnalytics.balanceScore(stats, weights)
-                val balances = DashboardAnalytics.categoryBalances(stats, weights)
-                _uiState.update {
-                    it.copy(
-                        categoryStats = statsMap,
-                        categoryStatsList = stats,
-                        balanceScore = score,
-                        categoryBalances = balances
-                    ).withRecommendation()
+                try {
+                    val weights = userGoalRepository.getCategoryWeights()
+                    val score = DashboardAnalytics.balanceScore(stats, weights)
+                    val balances = DashboardAnalytics.categoryBalances(stats, weights)
+                    _uiState.update {
+                        it.copy(
+                            categoryStats = statsMap,
+                            categoryStatsList = stats,
+                            balanceScore = score,
+                            categoryBalances = balances,
+                            error = null
+                        ).withRecommendation()
+                    }
+                } catch (e: PersistedDataDecodeException) {
+                    _uiState.update { it.copy(error = e.message ?: "Saved training-goal weights could not be decoded.") }
                 }
             }
         }
