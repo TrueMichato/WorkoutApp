@@ -9,8 +9,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.performTextReplacement
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.workoutapp.data.local.WorkoutDatabase
 import com.example.workoutapp.data.model.Difficulty
@@ -111,7 +111,8 @@ class ActiveWorkoutLoggingFlowTest {
         assertTrue(composeRule.onAllNodesWithTag(TestTags.ActiveWorkout.DurationField).fetchSemanticsNodes().isEmpty())
 
         // Out-of-range reps must be rejected with an actionable inline error, not silently dropped.
-        composeRule.onNodeWithTag(TestTags.ActiveWorkout.RepsField).performTextReplacement("500")
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.RepsField).performClick()
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.RepsField).performTextInput("500")
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
             .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.SaveSetButton))
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.SaveSetButton).performClick()
@@ -122,8 +123,10 @@ class ActiveWorkoutLoggingFlowTest {
         // Correcting the input and saving succeeds and shows the logged set.
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
             .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.RepsField))
-        composeRule.onNodeWithTag(TestTags.ActiveWorkout.RepsField).performTextReplacement("10")
-        composeRule.onNodeWithTag(TestTags.ActiveWorkout.WeightField).performTextReplacement("60")
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.RepsField).performTextClearance()
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.RepsField).performTextInput("10")
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.WeightField).performClick()
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.WeightField).performTextInput("60")
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
             .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.SaveSetButton))
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.SaveSetButton).performClick()
