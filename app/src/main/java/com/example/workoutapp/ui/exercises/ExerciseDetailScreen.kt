@@ -44,8 +44,8 @@ fun ExerciseDetailScreen(
     }
 
     // Archive removes the exercise from normal library flows and returns to the list.
-    LaunchedEffect(uiState.isDeleted) {
-        if (uiState.isDeleted) {
+    LaunchedEffect(uiState.archiveCompleted) {
+        if (uiState.archiveCompleted) {
             onNavigateBack()
         }
     }

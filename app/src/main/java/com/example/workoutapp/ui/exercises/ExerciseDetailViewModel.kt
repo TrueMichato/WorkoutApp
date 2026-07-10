@@ -107,7 +107,7 @@ class ExerciseDetailViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 exerciseRepository.archiveExercise(currentExerciseId)
-                _uiState.update { it.copy(isDeleted = true, error = null) }
+                _uiState.update { it.copy(archiveCompleted = true, error = null) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e.message ?: "Failed to archive exercise") }
             }
@@ -169,6 +169,6 @@ data class ExerciseDetailUiState(
     val programmingPresets: Map<TrainingPhase, ExerciseProgrammingPreset> = emptyMap(),
     val currentPhase: TrainingPhase = TrainingPhase.BALANCED,
     val isLoading: Boolean = true,
-    val isDeleted: Boolean = false,
+    val archiveCompleted: Boolean = false,
     val error: String? = null
 )

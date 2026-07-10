@@ -21,29 +21,63 @@ class ExercisesViewModel @Inject constructor(
 
     private val _searchQuery = MutableStateFlow("")
     private val _selectedCategory = MutableStateFlow<WorkoutCategory?>(null)
+    private val _libraryFilter = MutableStateFlow(ExerciseLibraryFilter.ACTIVE)
     private val _isImporting = MutableStateFlow(false)
     private val _importSummary = MutableStateFlow<String?>(null)
     private val _importErrors = MutableStateFlow<List<String>>(emptyList())
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val uiState: StateFlow<ExercisesUiState> = combine(
+    private val librarySelectionArgs: Flow<ExerciseLibrarySelectionArgs> = combine(
         _searchQuery,
         _selectedCategory,
+        _libraryFilter
+    ) { query, category, libraryFilter ->
+        ExerciseLibrarySelectionArgs(query, category, libraryFilter)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val uiState: StateFlow<ExercisesUiState> = combine(
+        librarySelectionArgs,
         _isImporting,
         _importSummary,
         _importErrors
-    ) { query, category, isImporting, importSummary, importErrors ->
-        ExercisesUiArgs(query, category, isImporting, importSummary, importErrors)
+    ) { selectionArgs, isImporting, importSummary, importErrors ->
+        ExercisesUiArgs(
+            query = selectionArgs.query,
+            category = selectionArgs.category,
+            libraryFilter = selectionArgs.libraryFilter,
+            isImporting = isImporting,
+            importSummary = importSummary,
+            importErrors = importErrors
+        )
     }.flatMapLatest { args ->
-        when {
+        val exercisesFlow = when {
+            args.libraryFilter == ExerciseLibraryFilter.ARCHIVED -> exerciseRepository.getAllExercisesIncludingArchived()
             args.query.isNotEmpty() -> exerciseRepository.searchExercises(args.query)
             args.category != null -> exerciseRepository.getExercisesByCategory(args.category)
             else -> exerciseRepository.getAllExercises()
-        }.map { exercises ->
+        }
+        exercisesFlow.map { exercises ->
+            val visibleExercises = when (args.libraryFilter) {
+                ExerciseLibraryFilter.ACTIVE -> exercises
+                ExerciseLibraryFilter.ARCHIVED -> {
+                    var archived = exercises.filter { exercise ->
+                        exercise.isArchived &&
+                            (args.query.isBlank() || exercise.matchesQuery(args.query))
+                    }
+                    args.category?.let { category ->
+                        archived = archived.filter { exercise ->
+                            category in exerciseRepository.getExerciseCategories(exercise.id)
+                        }
+                    }
+                    archived
+                }
+            }
             ExercisesUiState(
-                exercises = exercises,
+                exercises = visibleExercises,
                 searchQuery = args.query,
                 selectedCategory = args.category,
+                libraryFilter = args.libraryFilter,
                 isLoading = false,
                 isImporting = args.isImporting,
                 importSummary = args.importSummary,
@@ -62,6 +96,10 @@ class ExercisesViewModel @Inject constructor(
 
     fun onCategorySelected(category: WorkoutCategory?) {
         _selectedCategory.value = category
+    }
+
+    fun onLibraryFilterSelected(filter: ExerciseLibraryFilter) {
+        _libraryFilter.value = filter
     }
 
     fun toggleFavorite(exercise: Exercise) {
@@ -94,18 +132,31 @@ class ExercisesViewModel @Inject constructor(
     }
 }
 
+private data class ExerciseLibrarySelectionArgs(
+    val query: String,
+    val category: WorkoutCategory?,
+    val libraryFilter: ExerciseLibraryFilter
+)
+
 private data class ExercisesUiArgs(
     val query: String,
     val category: WorkoutCategory?,
+    val libraryFilter: ExerciseLibraryFilter,
     val isImporting: Boolean,
     val importSummary: String?,
     val importErrors: List<String>
 )
 
+enum class ExerciseLibraryFilter(val displayName: String) {
+    ACTIVE("Active"),
+    ARCHIVED("Archived")
+}
+
 data class ExercisesUiState(
     val exercises: List<Exercise> = emptyList(),
     val searchQuery: String = "",
     val selectedCategory: WorkoutCategory? = null,
+    val libraryFilter: ExerciseLibraryFilter = ExerciseLibraryFilter.ACTIVE,
     val isLoading: Boolean = false,
     val isImporting: Boolean = false,
     val importSummary: String? = null,
@@ -113,3 +164,8 @@ data class ExercisesUiState(
     val error: String? = null
 )
 
+private fun Exercise.matchesQuery(query: String): Boolean {
+    val normalizedQuery = query.trim()
+    return name.contains(normalizedQuery, ignoreCase = true) ||
+        description.contains(normalizedQuery, ignoreCase = true)
+}

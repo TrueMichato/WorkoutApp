@@ -2,6 +2,7 @@ package com.example.workoutapp
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.workoutapp.data.local.WorkoutDatabase
+import com.example.workoutapp.data.csv.ExerciseCsvImporter
 import com.example.workoutapp.data.model.Difficulty
 import com.example.workoutapp.data.model.Exercise
 import com.example.workoutapp.data.model.MuscleGroup
@@ -18,6 +19,8 @@ import com.example.workoutapp.data.repository.ExerciseRepository
 import com.example.workoutapp.data.repository.SessionExerciseConfig
 import com.example.workoutapp.data.repository.WorkoutSessionRepository
 import com.example.workoutapp.ui.exercises.AddEditExerciseViewModel
+import com.example.workoutapp.ui.exercises.ExerciseLibraryFilter
+import com.example.workoutapp.ui.exercises.ExercisesViewModel
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import javax.inject.Inject
@@ -53,6 +56,9 @@ class ExerciseProtectionInstrumentedTest {
 
     @Inject
     lateinit var workoutSessionRepository: WorkoutSessionRepository
+
+    @Inject
+    lateinit var exerciseCsvImporter: ExerciseCsvImporter
 
     @Before
     fun setUp() {
@@ -131,6 +137,36 @@ class ExerciseProtectionInstrumentedTest {
 
         val restored = exerciseRepository.getAllExercises().first().single { it.id == exerciseId }
         assertFalse(restored.isArchived)
+    }
+
+    @Test
+    fun exerciseLibraryFilter_showsArchivedExercisesOnlyWhenSelected() = runBlocking {
+        val activeId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Active library row"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        val archivedId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Archived library row"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        exerciseRepository.archiveExercise(archivedId)
+        val viewModel = ExercisesViewModel(exerciseRepository, exerciseCsvImporter)
+
+        val activeState = viewModel.uiState.first { !it.isLoading && it.exercises.any { exercise -> exercise.id == activeId } }
+
+        assertEquals(ExerciseLibraryFilter.ACTIVE, activeState.libraryFilter)
+        assertTrue(activeState.exercises.any { it.id == activeId })
+        assertFalse(activeState.exercises.any { it.id == archivedId })
+
+        viewModel.onLibraryFilterSelected(ExerciseLibraryFilter.ARCHIVED)
+
+        val archivedState = viewModel.uiState.first { it.libraryFilter == ExerciseLibraryFilter.ARCHIVED && !it.isLoading }
+        assertFalse(archivedState.exercises.any { it.id == activeId })
+        assertTrue(archivedState.exercises.single { it.id == archivedId }.isArchived)
     }
 
     @Test

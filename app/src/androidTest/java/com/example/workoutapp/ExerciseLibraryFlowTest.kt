@@ -4,10 +4,14 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import com.example.workoutapp.data.local.WorkoutDatabase
+import com.example.workoutapp.data.model.Exercise
+import com.example.workoutapp.data.repository.ExerciseRepository
+import com.example.workoutapp.ui.exercises.ExerciseLibraryFilter
 import com.example.workoutapp.ui.test.TestTags
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
@@ -31,6 +35,9 @@ class ExerciseLibraryFlowTest {
 
     @Inject
     lateinit var database: WorkoutDatabase
+
+    @Inject
+    lateinit var exerciseRepository: ExerciseRepository
 
     @Before
     fun setUp() {
@@ -58,6 +65,33 @@ class ExerciseLibraryFlowTest {
 
         composeRule.onNodeWithText(exerciseName).assertIsDisplayed()
     }
+
+    @Test
+    fun archivedExercisePath_opensDetailWithRestoreAction() {
+        val exerciseName = "Archived UI Row ${System.currentTimeMillis()}"
+        val exerciseId = runBlocking {
+            val id = exerciseRepository.createExerciseWithRelations(
+                exercise = Exercise(name = exerciseName, description = "Archived for restore"),
+                categories = emptyList(),
+                equipmentIds = emptyList(),
+                primaryMuscles = emptyList()
+            )
+            exerciseRepository.archiveExercise(id)
+            id
+        }
+
+        composeRule.onNodeWithText("Exercises").performClick()
+        composeRule.onNodeWithTag(TestTags.Exercises.Screen).assertIsDisplayed()
+        composeRule.onNodeWithTag(TestTags.Exercises.libraryFilter(ExerciseLibraryFilter.ARCHIVED)).performClick()
+
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText(exerciseName).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag(TestTags.Exercises.exerciseCard(exerciseId)).performClick()
+
+        composeRule.onNodeWithText("Archived").assertIsDisplayed()
+        composeRule.onNodeWithText(exerciseName).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("More").performClick()
+        composeRule.onNodeWithText("Restore").assertIsDisplayed()
+    }
 }
-
-
