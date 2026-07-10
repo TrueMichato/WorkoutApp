@@ -110,14 +110,14 @@ class ActiveWorkoutLoggingFlowTest {
         // Rep-based prescriptions have no meaningful duration metric.
         assertTrue(composeRule.onAllNodesWithTag(TestTags.ActiveWorkout.DurationField).fetchSemanticsNodes().isEmpty())
 
-        // Negative reps must be rejected with an actionable inline error, not silently dropped.
-        composeRule.onNodeWithTag(TestTags.ActiveWorkout.RepsField).performTextReplacement("-5")
+        // Out-of-range reps must be rejected with an actionable inline error, not silently dropped.
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.RepsField).performTextReplacement("500")
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
             .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.SaveSetButton))
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.SaveSetButton).performClick()
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
-            .performScrollToNode(hasText("Reps can't be negative"))
-        composeRule.onNodeWithText("Reps can't be negative").assertIsDisplayed()
+            .performScrollToNode(hasText("looks too high", substring = true))
+        composeRule.onNodeWithText("looks too high", substring = true).assertIsDisplayed()
 
         // Correcting the input and saving succeeds and shows the logged set.
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
