@@ -323,7 +323,12 @@ private fun BalanceBaselineCard(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSecondaryContainer
             )
-            Button(onClick = onGenerateWorkout, modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = onGenerateWorkout,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag(TestTags.Dashboard.GenerateWorkoutButton)
+            ) {
                 Text("Generate Workout")
             }
         }

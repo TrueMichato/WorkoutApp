@@ -69,7 +69,10 @@ interface ExerciseDao {
 
     // Update tracking fields
     @Query("UPDATE exercises SET lastPerformedAt = :timestamp, timesPerformed = timesPerformed + 1, updatedAt = :timestamp WHERE id = :exerciseId")
-    suspend fun markPerformed(exerciseId: Long, timestamp: Long = System.currentTimeMillis())
+    suspend fun markPerformed(exerciseId: Long, timestamp: Long = System.currentTimeMillis()): Int
+
+    @Query("UPDATE exercises SET lastPerformedAt = :timestamp, timesPerformed = timesPerformed + 1, updatedAt = :timestamp WHERE id IN (:exerciseIds)")
+    suspend fun markPerformed(exerciseIds: List<Long>, timestamp: Long = System.currentTimeMillis()): Int
 
     @Query("UPDATE exercises SET isFavorite = :isFavorite, updatedAt = :timestamp WHERE id = :exerciseId")
     suspend fun setFavorite(exerciseId: Long, isFavorite: Boolean, timestamp: Long = System.currentTimeMillis())

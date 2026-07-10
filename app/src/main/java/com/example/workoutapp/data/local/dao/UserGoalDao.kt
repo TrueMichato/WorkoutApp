@@ -45,10 +45,10 @@ interface UserGoalDao {
     fun getCategoryStatsByNeglect(): Flow<List<CategoryStats>>
 
     @Query("UPDATE category_stats SET lastTrainedAt = :timestamp, totalSessions = totalSessions + 1, daysSinceLastTrained = 0, updatedAt = :timestamp WHERE category = :category")
-    suspend fun recordCategoryTraining(category: WorkoutCategory, timestamp: Long = System.currentTimeMillis())
+    suspend fun recordCategoryTraining(category: WorkoutCategory, timestamp: Long = System.currentTimeMillis()): Int
 
     @Query("UPDATE category_stats SET totalMinutes = totalMinutes + :minutes, updatedAt = :timestamp WHERE category = :category")
-    suspend fun addCategoryMinutes(category: WorkoutCategory, minutes: Int, timestamp: Long = System.currentTimeMillis())
+    suspend fun addCategoryMinutes(category: WorkoutCategory, minutes: Int, timestamp: Long = System.currentTimeMillis()): Int
 
     // Recalculate days since last trained (should be called periodically)
     @Query("""
@@ -61,4 +61,3 @@ interface UserGoalDao {
     """)
     suspend fun recalculateDaysSinceLastTrained(now: Long = System.currentTimeMillis())
 }
-

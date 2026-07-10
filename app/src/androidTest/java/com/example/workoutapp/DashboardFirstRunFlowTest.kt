@@ -45,7 +45,7 @@ class DashboardFirstRunFlowTest {
         composeRule.onNodeWithTag(TestTags.Dashboard.Screen).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.Dashboard.BalanceBaselineCard).assertIsDisplayed()
         composeRule.onNodeWithText("Learning your baseline").assertIsDisplayed()
-        composeRule.onNodeWithText("Generate Workout").assertIsDisplayed()
+        composeRule.onNodeWithTag(TestTags.Dashboard.GenerateWorkoutButton).assertIsDisplayed()
         assertTrue(composeRule.onAllNodesWithText("Very Unbalanced").fetchSemanticsNodes().isEmpty())
         composeRule.onNodeWithContentDescription(
             label = "Training balance baseline is still learning",
