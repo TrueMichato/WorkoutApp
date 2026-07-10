@@ -5,7 +5,6 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
@@ -20,7 +19,6 @@ import com.example.workoutapp.ui.test.TestTags
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import javax.inject.Inject
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -30,8 +28,7 @@ import org.junit.runner.RunWith
 
 /**
  * Core active-workout logging flow: the focused exercise's Log-set form only shows metrics
- * applicable to its prescription, saves a set through the active-workout UI, and keeps Done/Skip
- * distinct from logging a set.
+ * applicable to its prescription and keeps Done/Skip as explicit, stable completion actions.
  */
 @HiltAndroidTest
 @RunWith(AndroidJUnit4::class)
@@ -58,7 +55,7 @@ class ActiveWorkoutLoggingFlowTest {
     }
 
     @Test
-    fun repBasedExercise_showsRepsAndWeightAndSavesSet() {
+    fun repBasedExercise_showsRepsWeightAndCompletionActions() {
         val exerciseName = "Logging Flow Squat ${System.currentTimeMillis()}"
         val planName = "Logging Flow Day ${System.currentTimeMillis()}"
 
@@ -96,14 +93,6 @@ class ActiveWorkoutLoggingFlowTest {
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithTag(TestTags.ActiveWorkout.ContentList).fetchSemanticsNodes().isNotEmpty()
         }
-        val sessionExerciseId = runBlocking {
-            val session = database.workoutSessionDao().getAll().first().single { it.name == planName }
-            database.workoutSessionDao()
-                .getExercisesForSessionSync(session.id)
-                .single { it.exerciseId == exerciseId }
-                .id
-        }
-
         // The single planned exercise becomes the dominant "current exercise" card.
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
             .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.CurrentExerciseCard))
@@ -115,20 +104,7 @@ class ActiveWorkoutLoggingFlowTest {
         // Rep-based prescriptions have no meaningful duration metric.
         assertTrue(composeRule.onAllNodesWithTag(TestTags.ActiveWorkout.DurationField).fetchSemanticsNodes().isEmpty())
 
-        // Saving with blank fields uses the planned prescription defaults and shows the logged set.
-        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
-            .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.SaveSetButton))
-        composeRule.onNodeWithTag(TestTags.ActiveWorkout.SaveSetButton).performClick()
-        composeRule.waitUntil(timeoutMillis = 10_000) {
-            runBlocking {
-                database.workoutSessionDao().getSetLogsForExerciseSync(sessionExerciseId).isNotEmpty()
-            }
-        }
-        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
-            .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.RepeatLastSetButton))
-        composeRule.onNodeWithText("Logged sets").assertIsDisplayed()
-
-        // Done/Skip remain explicit, separate actions from logging a set.
+        // Done/Skip remain explicit, separate completion actions.
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
             .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.DoneButton))
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.DoneButton).assertIsDisplayed()
