@@ -1,12 +1,17 @@
 package com.example.workoutapp.ui.workout
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.workoutapp.data.model.EquipmentLocation
 import com.example.workoutapp.data.model.Exercise
+import com.example.workoutapp.data.model.ExerciseCompletionState
 import com.example.workoutapp.data.model.SessionExercise
 import com.example.workoutapp.data.model.SessionStatus
+import com.example.workoutapp.data.model.SetEntryDraft
+import com.example.workoutapp.data.model.SetEntryFieldErrors
 import com.example.workoutapp.data.model.SetLog
+import com.example.workoutapp.data.model.SetMetricVisibility
 import com.example.workoutapp.data.model.TimeSlot
 import com.example.workoutapp.data.model.TrainingPhase
 import com.example.workoutapp.data.model.UserGoal
@@ -19,9 +24,14 @@ import com.example.workoutapp.data.model.WorkoutPlanTemplate
 import com.example.workoutapp.data.model.WorkoutPlanTemplateExercise
 import com.example.workoutapp.data.model.WorkoutPlanTemplateSummary
 import com.example.workoutapp.data.model.WorkoutSession
+import com.example.workoutapp.data.model.decodeSetEntryDrafts
+import com.example.workoutapp.data.model.encodeSetEntryDrafts
+import com.example.workoutapp.data.model.parseTimedPrescriptionSeconds
 import com.example.workoutapp.data.model.resolveBalancedProgrammingPreset
+import com.example.workoutapp.data.model.resolveSetMetricVisibility
 import com.example.workoutapp.data.model.toJson
 import com.example.workoutapp.data.model.toRichPrescriptionDataOrNull
+import com.example.workoutapp.data.model.validateSetEntryDraft
 import com.example.workoutapp.data.repository.ExerciseRepository
 import com.example.workoutapp.data.repository.EquipmentRepository
 import com.example.workoutapp.data.repository.MLFeedbackRepository
@@ -61,7 +71,8 @@ class WorkoutViewModel @Inject constructor(
     private val equipmentRepository: EquipmentRepository,
     private val userGoalRepository: UserGoalRepository,
     private val mlFeedbackRepository: MLFeedbackRepository,
-    private val workoutPlanner: WorkoutPlanner
+    private val workoutPlanner: WorkoutPlanner,
+    private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -87,7 +98,15 @@ class WorkoutViewModel @Inject constructor(
     private val _isCompletingWorkout = MutableStateFlow(false)
     private val _completedWorkoutId = MutableStateFlow<Long?>(null)
     private val _activeWorkoutError = MutableStateFlow<String?>(null)
-    private val _setEntryDrafts = MutableStateFlow<Map<Long, SetEntryDraft>>(emptyMap())
+    // Drafts and the focused exercise are restored from SavedStateHandle so an in-progress set
+    // entry (and where the user was) survives configuration changes and process death without
+    // ever being written to Room as a completed set.
+    private var draftsSessionId: Long? = savedStateHandle.get<Long>(KEY_DRAFTS_SESSION_ID)
+    private val _setEntryDrafts = MutableStateFlow(
+        decodeSetEntryDrafts(savedStateHandle.get<String>(KEY_DRAFTS_JSON))
+    )
+    private val _setEntryErrors = MutableStateFlow<Map<Long, SetEntryFieldErrors>>(emptyMap())
+    private val _focusedExerciseId = MutableStateFlow(savedStateHandle.get<Long>(KEY_FOCUSED_EXERCISE_ID))
     /** Bumped to force active-workout recomposition after set log / exercise status writes */
     private val _activeRefreshTick = MutableStateFlow(0)
 
@@ -194,7 +213,7 @@ class WorkoutViewModel @Inject constructor(
                 sessionRepository.getExercisesForSession(sessionId),
                 exerciseRepository.getAllExercises(),
                 _completionInput, _isCompletingWorkout, _completedWorkoutId, _activeWorkoutError,
-                _setEntryDrafts, _activeRefreshTick
+                _setEntryDrafts, _setEntryErrors, _focusedExerciseId, _activeRefreshTick
             ) { values ->
                 @Suppress("UNCHECKED_CAST")
                 val session = values[0] as WorkoutSession?
@@ -208,7 +227,10 @@ class WorkoutViewModel @Inject constructor(
                 val activeError = values[6] as String?
                 @Suppress("UNCHECKED_CAST")
                 val drafts = values[7] as Map<Long, SetEntryDraft>
-                // values[8] is refreshTick – only used to trigger recomposition
+                @Suppress("UNCHECKED_CAST")
+                val fieldErrors = values[8] as Map<Long, SetEntryFieldErrors>
+                val explicitFocusId = values[9] as Long?
+                // values[10] is refreshTick – only used to trigger recomposition
 
                 val exerciseById = exerciseLibrary.associateBy { it.id }
                 val exercises = sessionExercises.map { se ->
@@ -217,11 +239,18 @@ class WorkoutViewModel @Inject constructor(
                         sessionExercise = se,
                         exercise = exerciseById[se.exerciseId],
                         setLogs = logs,
-                        draft = drafts[se.id] ?: SetEntryDraft()
+                        draft = drafts[se.id] ?: SetEntryDraft(),
+                        fieldErrors = fieldErrors[se.id] ?: SetEntryFieldErrors()
                     )
                 }
+                val resolvedFocusId = explicitFocusId?.takeIf { id -> exercises.any { it.sessionExercise.id == id } }
+                    ?: exercises.firstOrNull {
+                        it.completionState == ExerciseCompletionState.NOT_STARTED ||
+                            it.completionState == ExerciseCompletionState.LOGGED
+                    }?.sessionExercise?.id
+                    ?: exercises.firstOrNull()?.sessionExercise?.id
                 ActiveWorkoutUiState(
-                    session = session, exercises = exercises,
+                    session = session, exercises = exercises, focusedExerciseId = resolvedFocusId,
                     completionInput = completionInput, isCompleting = isCompleting,
                     completedWorkoutId = completedId, error = activeError, isLoading = false
                 )
@@ -562,7 +591,18 @@ class WorkoutViewModel @Inject constructor(
         _activeSessionId.value = sessionId
         _completedWorkoutId.value = null
         _activeWorkoutError.value = null
-        _setEntryDrafts.value = emptyMap()
+        _setEntryErrors.value = emptyMap()
+        // Only wipe restored drafts/focus if this is a different session than the one we
+        // restored from SavedStateHandle (e.g. the user opened a new workout). Reopening the
+        // same session after a configuration change or process death keeps them.
+        if (draftsSessionId != sessionId) {
+            draftsSessionId = sessionId
+            _setEntryDrafts.value = emptyMap()
+            _focusedExerciseId.value = null
+            savedStateHandle[KEY_DRAFTS_SESSION_ID] = sessionId
+            persistDrafts(emptyMap())
+            persistFocusedExercise(null)
+        }
         viewModelScope.launch {
             sessionRepository.getSessionById(sessionId)?.let { session ->
                 _completionInput.value = WorkoutCompletionInput(
@@ -607,6 +647,12 @@ class WorkoutViewModel @Inject constructor(
         }
     }
 
+    /** Focuses a specific exercise as the "current" one, e.g. when the user taps another card. */
+    fun setFocusedExercise(sessionExerciseId: Long?) {
+        _focusedExerciseId.value = sessionExerciseId
+        persistFocusedExercise(sessionExerciseId)
+    }
+
     // --- Set entry draft helpers ---
     fun updateSetDraftReps(seId: Long, v: String) = updateDraft(seId) { copy(reps = v) }
     fun updateSetDraftWeight(seId: Long, v: String) = updateDraft(seId) { copy(weight = v) }
@@ -614,26 +660,51 @@ class WorkoutViewModel @Inject constructor(
     fun updateSetDraftRpe(seId: Long, v: String) = updateDraft(seId) { copy(rpe = v) }
     fun updateSetDraftNotes(seId: Long, v: String) = updateDraft(seId) { copy(notes = v) }
 
+    /** Prefills the draft for [item] with the most recently logged set, for one-handed repeats. */
+    fun repeatLastSet(item: SessionExerciseUi) {
+        val lastLog = item.setLogs.maxByOrNull { it.setNumber } ?: return
+        updateDraft(item.sessionExercise.id) {
+            copy(
+                reps = lastLog.reps?.toString() ?: reps,
+                weight = lastLog.weight?.let { w -> if (w % 1f == 0f) w.toInt().toString() else w.toString() } ?: weight,
+                durationSeconds = lastLog.durationSeconds?.toString() ?: durationSeconds,
+                rpe = lastLog.rpe?.toString() ?: rpe
+            )
+        }
+    }
+
     fun saveSetLog(item: SessionExerciseUi) {
         viewModelScope.launch {
             try {
                 _activeWorkoutError.value = null
                 val draft = _setEntryDrafts.value[item.sessionExercise.id] ?: SetEntryDraft()
+                val metrics = item.metricVisibility
+                val validated = validateSetEntryDraft(draft, metrics)
+                if (!validated.isValid) {
+                    _setEntryErrors.value = _setEntryErrors.value + (item.sessionExercise.id to validated.errors)
+                    return@launch
+                }
+                _setEntryErrors.value = _setEntryErrors.value - item.sessionExercise.id
+
                 val nextSet = (item.setLogs.maxOfOrNull { it.setNumber } ?: 0) + 1
                 val richPrescription = item.sessionExercise.prescriptionJson.toRichPrescriptionDataOrNull()
                 val log = SetLog(
                     sessionExerciseId = item.sessionExercise.id,
                     setNumber = nextSet,
-                    reps = draft.reps.toIntOrNull() ?: extractFirstInt(item.sessionExercise.plannedReps),
-                    weight = draft.weight.toFloatOrNull(),
+                    reps = if (metrics.showReps) validated.reps ?: extractFirstInt(item.sessionExercise.plannedReps) else null,
+                    weight = if (metrics.showWeight) validated.weight else null,
                     weightUnit = WeightUnit.KG,
-                    durationSeconds = draft.durationSeconds.toIntOrNull() ?: richPrescription?.durationSeconds,
-                    rpe = draft.rpe.toIntOrNull()?.coerceIn(1, 10),
+                    durationSeconds = if (metrics.showDuration) {
+                        validated.durationSeconds ?: richPrescription?.durationSeconds
+                            ?: parseTimedPrescriptionSeconds(item.sessionExercise.plannedReps)
+                    } else null,
+                    rpe = validated.rpe,
                     restTakenSeconds = item.sessionExercise.plannedRestSeconds,
-                    notes = draft.notes
+                    notes = validated.notes
                 )
                 sessionRepository.logSet(log)
                 _setEntryDrafts.value = _setEntryDrafts.value.toMutableMap().apply { remove(item.sessionExercise.id) }
+                persistDrafts(_setEntryDrafts.value)
                 refreshActive()
             } catch (e: Exception) {
                 _activeWorkoutError.value = e.message ?: "Failed to save set."
@@ -871,7 +942,22 @@ class WorkoutViewModel @Inject constructor(
         _setEntryDrafts.value = _setEntryDrafts.value.toMutableMap().apply {
             this[seId] = (this[seId] ?: SetEntryDraft()).transform()
         }
+        persistDrafts(_setEntryDrafts.value)
+        // Clear any stale error for this exercise once the user edits the draft; it will be
+        // re-validated on the next save attempt.
+        if (_setEntryErrors.value.containsKey(seId)) {
+            _setEntryErrors.value = _setEntryErrors.value - seId
+        }
     }
+
+    private fun persistDrafts(drafts: Map<Long, SetEntryDraft>) {
+        savedStateHandle[KEY_DRAFTS_JSON] = encodeSetEntryDrafts(drafts)
+    }
+
+    private fun persistFocusedExercise(sessionExerciseId: Long?) {
+        savedStateHandle[KEY_FOCUSED_EXERCISE_ID] = sessionExerciseId
+    }
+
     private fun extractFirstInt(value: String): Int? = Regex("\\d+").find(value)?.value?.toIntOrNull()
 
     private fun parsePlanCategories(value: String): Set<WorkoutCategory> =
@@ -882,6 +968,12 @@ class WorkoutViewModel @Inject constructor(
         } catch (_: Exception) {
             emptySet()
         }
+
+    private companion object {
+        const val KEY_DRAFTS_SESSION_ID = "activeWorkout_draftsSessionId"
+        const val KEY_DRAFTS_JSON = "activeWorkout_draftsJson"
+        const val KEY_FOCUSED_EXERCISE_ID = "activeWorkout_focusedExerciseId"
+    }
 }
 
 // ========== Internal state helpers ==========
@@ -902,7 +994,6 @@ private data class GeneratorStatusState(
 )
 
 // ========== Public UI state classes ==========
-data class SetEntryDraft(val reps: String = "", val weight: String = "", val durationSeconds: String = "", val rpe: String = "", val notes: String = "")
 
 data class WorkoutOverviewUiState(
     val activeSession: WorkoutSession? = null,
@@ -928,13 +1019,19 @@ data class SessionExerciseUi(
     val sessionExercise: SessionExercise,
     val exercise: Exercise?,
     val setLogs: List<SetLog> = emptyList(),
-    val draft: SetEntryDraft = SetEntryDraft()
+    val draft: SetEntryDraft = SetEntryDraft(),
+    val fieldErrors: SetEntryFieldErrors = SetEntryFieldErrors()
 ) {
     val completionState = WorkoutCompletionSemantics.exerciseState(sessionExercise, setLogs.size)
+    val metricVisibility: SetMetricVisibility = resolveSetMetricVisibility(
+        sessionExercise.plannedReps,
+        sessionExercise.prescriptionJson.toRichPrescriptionDataOrNull()
+    )
 }
 
 data class ActiveWorkoutUiState(
     val session: WorkoutSession? = null, val exercises: List<SessionExerciseUi> = emptyList(),
+    val focusedExerciseId: Long? = null,
     val completionInput: WorkoutCompletionInput = WorkoutCompletionInput(),
     val isCompleting: Boolean = false, val completedWorkoutId: Long? = null,
     val error: String? = null, val isLoading: Boolean = false
