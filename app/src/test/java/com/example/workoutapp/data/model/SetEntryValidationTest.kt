@@ -9,7 +9,7 @@ import org.junit.Test
 class SetEntryValidationTest {
 
     private val repBasedMetrics = SetMetricVisibility(showReps = true, showWeight = true, showDuration = false)
-    private val timedMetrics = SetMetricVisibility(showReps = false, showWeight = false, showDuration = true)
+    private val timedMetrics = SetMetricVisibility(showReps = false, showWeight = true, showDuration = true)
 
     @Test
     fun validate_blankFieldsAreValidAndParseToNull() {
@@ -88,16 +88,60 @@ class SetEntryValidationTest {
     }
 
     @Test
-    fun validate_hiddenFieldsAreIgnoredEvenIfPopulatedWithGarbage() {
-        // A timed exercise hides reps/weight; even nonsensical text in those drafted fields
-        // (e.g. leftover from switching exercises) must not produce errors or block saving.
-        val draft = SetEntryDraft(reps = "not-a-number", weight = "-99", durationSeconds = "45")
+    fun validate_hiddenRepsAreIgnoredEvenIfPopulatedWithGarbageOnATimedExercise() {
+        // A timed exercise hides reps only; even nonsensical text left over in that field
+        // (e.g. from switching exercises) must not produce an error or block saving.
+        val draft = SetEntryDraft(reps = "not-a-number", weight = "40", durationSeconds = "45")
         val result = validateSetEntryDraft(draft, timedMetrics)
 
         assertTrue(result.isValid)
         assertNull(result.reps)
-        assertNull(result.weight)
+        assertEquals(40f, result.weight)
         assertEquals(45, result.durationSeconds)
+    }
+
+    @Test
+    fun validate_weightIsAvailableAndValidatedOnTimedExercises() {
+        // Duration and load can coexist (e.g. a weighted farmer's walk or loaded plank hold),
+        // so weight must still be captured and validated for timed prescriptions, not silently
+        // dropped just because the exercise is duration-based.
+        val negative = validateSetEntryDraft(SetEntryDraft(weight = "-20", durationSeconds = "30"), timedMetrics)
+        val valid = validateSetEntryDraft(SetEntryDraft(weight = "20", durationSeconds = "30"), timedMetrics)
+
+        assertFalse(negative.isValid)
+        assertNull(negative.weight)
+        assertTrue(negative.errors.weight!!.contains("negative"))
+
+        assertTrue(valid.isValid)
+        assertEquals(20f, valid.weight)
+        assertEquals(30, valid.durationSeconds)
+    }
+
+    @Test
+    fun validate_nanWeightIsRejected() {
+        val result = validateSetEntryDraft(SetEntryDraft(weight = "NaN"), repBasedMetrics)
+
+        assertFalse(result.isValid)
+        assertNull(result.weight)
+        assertEquals("Enter a valid weight", result.errors.weight)
+    }
+
+    @Test
+    fun validate_positiveInfinityWeightIsRejected() {
+        val result = validateSetEntryDraft(SetEntryDraft(weight = "Infinity"), repBasedMetrics)
+
+        assertFalse(result.isValid)
+        assertNull(result.weight)
+        assertEquals("Enter a valid weight", result.errors.weight)
+    }
+
+    @Test
+    fun validate_negativeInfinityWeightIsRejected() {
+        val result = validateSetEntryDraft(SetEntryDraft(weight = "-Infinity"), repBasedMetrics)
+
+        assertFalse(result.isValid)
+        assertNull(result.weight)
+        assertEquals("Enter a valid weight", result.errors.weight)
     }
 
     @Test

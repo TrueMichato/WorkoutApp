@@ -37,23 +37,26 @@ class SetLoggingMetricsTest {
     }
 
     @Test
-    fun resolveSetMetricVisibility_durationTextHidesRepsAndWeight() {
+    fun resolveSetMetricVisibility_durationTextHidesRepsButKeepsWeight() {
+        // Duration and load can coexist (e.g. a weighted farmer's walk or a loaded plank hold).
+        // The model has no per-exercise load-capability signal, so weight stays visible for
+        // timed prescriptions rather than being silently hidden/dropped.
         val metrics = resolveSetMetricVisibility(plannedReps = "30s", richPrescription = null)
 
         assertFalse(metrics.showReps)
-        assertFalse(metrics.showWeight)
+        assertTrue(metrics.showWeight)
         assertTrue(metrics.showDuration)
     }
 
     @Test
-    fun resolveSetMetricVisibility_explicitRichPrescriptionDurationHidesRepsAndWeight() {
+    fun resolveSetMetricVisibility_explicitRichPrescriptionDurationHidesRepsButKeepsWeight() {
         val metrics = resolveSetMetricVisibility(
             plannedReps = "AMRAP",
             richPrescription = RichPrescriptionData(durationSeconds = 40)
         )
 
         assertFalse(metrics.showReps)
-        assertFalse(metrics.showWeight)
+        assertTrue(metrics.showWeight)
         assertTrue(metrics.showDuration)
     }
 

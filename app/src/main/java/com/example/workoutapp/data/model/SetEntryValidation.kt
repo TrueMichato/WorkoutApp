@@ -108,6 +108,7 @@ private fun parseNonNegativeFloat(raw: String, max: Float, label: String): Field
     val parsed = trimmed.toFloatOrNull()
         ?: return Field(null, "Enter a valid $label")
     return when {
+        !parsed.isFinite() -> Field(null, "Enter a valid $label")
         parsed < 0f -> Field(null, "${label.capitalizeFirst()} can't be negative")
         parsed > max -> Field(null, "${label.capitalizeFirst()} looks too high (max $max)")
         else -> Field(parsed, null)

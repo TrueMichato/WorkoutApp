@@ -7,13 +7,21 @@ package com.example.workoutapp.data.model
  * [RichPrescriptionData] (planned reps text and prescribed work duration) — no new
  * modality/exercise-type schema is introduced. This keeps the mapping conservative and
  * explainable: a prescription that reads as a duration (e.g. "30s") or that carries an
- * explicit [RichPrescriptionData.durationSeconds] is treated as time-based and shows a
- * duration field instead of reps/weight; everything else is treated as a rep-based lift and
- * shows reps + weight instead of duration.
+ * explicit [RichPrescriptionData.durationSeconds] is treated as time-based and shows the
+ * duration field instead of reps; everything else is treated as a rep-based lift and shows
+ * reps instead of duration.
+ *
+ * Weight is shown for BOTH timed and rep-based entries. The data model has no
+ * bodyweight/load-capability signal per exercise (e.g. nothing distinguishes a bodyweight
+ * plank hold from a weighted farmer's walk, both of which are prescribed by duration), so
+ * hiding weight for every timed exercise would silently drop load data for real, shipped
+ * exercises. Showing weight unconditionally is the lossless, conservative choice: it never
+ * hides a metric a user might legitimately need, and an empty weight field costs nothing for
+ * exercises where load truly doesn't apply.
  */
 data class SetMetricVisibility(
     val showReps: Boolean,
-    val showWeight: Boolean,
+    val showWeight: Boolean = true,
     val showDuration: Boolean,
     val showRpe: Boolean = true,
     val showNotes: Boolean = true
@@ -43,7 +51,7 @@ fun resolveSetMetricVisibility(
         richPrescription?.durationSeconds != null
     return SetMetricVisibility(
         showReps = !isTimed,
-        showWeight = !isTimed,
+        showWeight = true,
         showDuration = isTimed
     )
 }

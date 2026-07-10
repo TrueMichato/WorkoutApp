@@ -1477,7 +1477,10 @@ private fun SteppedNumberField(
 }
 
 private fun adjustNumericString(current: String, delta: Double): String {
-    val base = current.trim().toDoubleOrNull() ?: 0.0
+    // Guard against non-finite base values (NaN/Infinity from paste or accessibility input) so
+    // the stepper never produces a non-finite draft; fall back to a fresh baseline instead.
+    val parsedBase = current.trim().toDoubleOrNull()
+    val base = if (parsedBase != null && parsedBase.isFinite()) parsedBase else 0.0
     val next = (base + delta).coerceAtLeast(0.0)
     return if (next % 1.0 == 0.0) next.toInt().toString() else String.format(Locale.US, "%.1f", next)
 }
