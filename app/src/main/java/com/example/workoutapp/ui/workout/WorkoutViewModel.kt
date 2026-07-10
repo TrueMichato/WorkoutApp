@@ -25,9 +25,11 @@ import com.example.workoutapp.data.model.WorkoutPlanTemplate
 import com.example.workoutapp.data.model.WorkoutPlanTemplateExercise
 import com.example.workoutapp.data.model.WorkoutPlanTemplateSummary
 import com.example.workoutapp.data.model.WorkoutSession
+import com.example.workoutapp.data.model.decodeGeneratorCategorySelection
 import com.example.workoutapp.data.model.decodePersistedEnumNameList
 import com.example.workoutapp.data.model.decodeStoredProgrammingPresets
 import com.example.workoutapp.data.model.decodeSetEntryDrafts
+import com.example.workoutapp.data.model.encodeGeneratorCategorySelection
 import com.example.workoutapp.data.model.encodeSetEntryDrafts
 import com.example.workoutapp.data.model.parseTimedPrescriptionSeconds
 import com.example.workoutapp.data.model.persistedJson
@@ -61,7 +63,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -79,20 +80,32 @@ class WorkoutViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
     // --- Generator state ---
-    private val _selectedLocationId = MutableStateFlow<Long?>(null)
-    private val _durationMinutes = MutableStateFlow<Int?>(null)
-    private val _selectedCategories = MutableStateFlow<Set<WorkoutCategory>>(emptySet())
-    private val _selectedTimeSlot = MutableStateFlow(TimeSlot.ANYTIME)
+    // Selections (location/duration/time slot/categories) are seeded from SavedStateHandle so an
+    // in-progress generator setup survives configuration changes and process death, mirroring the
+    // convention used for active-workout set drafts below. They reset only via
+    // resetGeneratorSetup(), never implicitly.
+    private val _selectedLocationId = MutableStateFlow(savedStateHandle.get<Long>(KEY_GEN_LOCATION_ID))
+    private val _durationMinutes = MutableStateFlow(savedStateHandle.get<Int>(KEY_GEN_DURATION_MINUTES))
+    private val _selectedCategories = MutableStateFlow(
+        decodeGeneratorCategorySelection(savedStateHandle.get<String>(KEY_GEN_CATEGORIES_JSON))
+    )
+    private val _selectedTimeSlot = MutableStateFlow(
+        savedStateHandle.get<String>(KEY_GEN_TIME_SLOT)
+            ?.let { name -> TimeSlot.entries.firstOrNull { it.name == name } }
+            ?: TimeSlot.ANYTIME
+    )
     private val _excludedPreviewExerciseIds = MutableStateFlow<Set<Long>>(emptySet())
     private val _previewFeedbackSessionId = MutableStateFlow<Long?>(null)
     private val _isGenerating = MutableStateFlow(false)
     private val _isPreviewing = MutableStateFlow(false)
     private val _generationError = MutableStateFlow<String?>(null)
+    private val _lastFailedGeneratorAction = MutableStateFlow<GeneratorAction?>(null)
     private val _generationWarning = MutableStateFlow<String?>(null)
     private val _generatedSessionId = MutableStateFlow<Long?>(null)
     private val _previewDraft = MutableStateFlow<WorkoutPlanDraft?>(null)
     private val _isSavingPlan = MutableStateFlow(false)
     private val _planSaveMessage = MutableStateFlow<String?>(null)
+    private val _lastFailedSavePlanInput = MutableStateFlow<SaveWorkoutPlanTemplateInput?>(null)
 
     // --- Active workout state ---
     private val _activeSessionId = MutableStateFlow<Long?>(null)
@@ -144,7 +157,8 @@ class WorkoutViewModel @Inject constructor(
     private val generatorBaseState = combine(
         equipmentRepository.getAllLocations(),
         equipmentRepository.getDefaultLocationFlow(),
-        userGoalRepository.getUserGoalFlow().map { it ?: UserGoal() },
+        userGoalRepository.getUserGoalFlow(),
+        userGoalRepository.hasCustomizedProfileFlow(),
         _selectedLocationId,
         _durationMinutes,
         _excludedPreviewExerciseIds
@@ -152,11 +166,18 @@ class WorkoutViewModel @Inject constructor(
         @Suppress("UNCHECKED_CAST")
         val locations = args[0] as List<EquipmentLocation>
         val defaultLocation = args[1] as EquipmentLocation?
-        val userGoal = args[2] as UserGoal
-        val selectedLocationId = args[3] as Long?
-        val durationMinutes = args[4] as Int?
+        // A saved UserGoal row exists for every install (the database seeds a neutral
+        // UserGoal() row on first launch), so its mere presence is never proof the user made a
+        // choice. hasCustomizedProfile is the durable, DataStore-backed signal set only from the
+        // real Settings save flow (setTrainingPhase/setCategoryWeights) - that's what drives the
+        // "personalized vs. neutral defaults" messaging honestly.
+        val savedUserGoal = args[2] as UserGoal?
+        val hasCustomizedProfile = args[3] as Boolean
+        val userGoal = savedUserGoal ?: UserGoal()
+        val selectedLocationId = args[4] as Long?
+        val durationMinutes = args[5] as Int?
         @Suppress("UNCHECKED_CAST")
-        val excludedPreviewExerciseIds = args[5] as Set<Long>
+        val excludedPreviewExerciseIds = args[6] as Set<Long>
 
         GeneratorBaseState(
             locations = locations,
@@ -164,7 +185,8 @@ class WorkoutViewModel @Inject constructor(
             defaultLocationId = defaultLocation?.id ?: locations.firstOrNull()?.id,
             durationMinutes = durationMinutes ?: userGoal.preferredSessionDurationMinutes,
             currentPhase = userGoal.currentPhase,
-            excludedPreviewExerciseIds = excludedPreviewExerciseIds
+            excludedPreviewExerciseIds = excludedPreviewExerciseIds,
+            hasSavedProfile = hasCustomizedProfile
         )
     }
 
@@ -173,18 +195,19 @@ class WorkoutViewModel @Inject constructor(
     ) { base, cats, slot -> GeneratorSelectionState(base, cats.toList(), slot) }
 
     private val generatorStatusState = combine(
-        _isGenerating, _isPreviewing, _generationError, _generationWarning,
+        _isGenerating, _isPreviewing, _generationError, _lastFailedGeneratorAction, _generationWarning,
         _generatedSessionId, _previewDraft, _isSavingPlan, _planSaveMessage
     ) { args: Array<Any?> ->
         GeneratorStatusState(
             isGenerating = args[0] as Boolean,
             isPreviewing = args[1] as Boolean,
             error = args[2] as String?,
-            warning = args[3] as String?,
-            generatedSessionId = args[4] as Long?,
-            previewDraft = args[5] as WorkoutPlanDraft?,
-            isSavingPlan = args[6] as Boolean,
-            planSaveMessage = args[7] as String?
+            lastFailedAction = args[3] as GeneratorAction?,
+            warning = args[4] as String?,
+            generatedSessionId = args[5] as Long?,
+            previewDraft = args[6] as WorkoutPlanDraft?,
+            isSavingPlan = args[7] as Boolean,
+            planSaveMessage = args[8] as String?
         )
     }
 
@@ -198,9 +221,11 @@ class WorkoutViewModel @Inject constructor(
             selectedCategories = sel.selectedCategories,
             selectedTimeSlot = sel.selectedTimeSlot,
             currentPhase = sel.base.currentPhase,
+            hasSavedProfile = sel.base.hasSavedProfile,
             excludedExerciseIds = sel.base.excludedPreviewExerciseIds,
             isGenerating = st.isGenerating, isPreviewing = st.isPreviewing,
-            error = st.error, warning = st.warning, generatedSessionId = st.generatedSessionId, previewDraft = st.previewDraft,
+            error = st.error, warning = st.warning, lastFailedAction = st.lastFailedAction,
+            generatedSessionId = st.generatedSessionId, previewDraft = st.previewDraft,
             hasPreviewCustomizations = sel.base.excludedPreviewExerciseIds.isNotEmpty(),
             isSavingPlan = st.isSavingPlan,
             planSaveMessage = st.planSaveMessage
@@ -285,17 +310,70 @@ class WorkoutViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WorkoutHistoryUiState(isLoading = true))
 
     // ========== Generator actions ==========
-    fun selectLocation(locationId: Long) { _selectedLocationId.value = locationId; invalidateGeneratorPreview() }
-    fun updateDuration(minutes: Int) { _durationMinutes.value = minutes; invalidateGeneratorPreview() }
-    fun selectTimeSlot(timeSlot: TimeSlot) { _selectedTimeSlot.value = timeSlot; invalidateGeneratorPreview() }
-    fun toggleCategory(category: WorkoutCategory) {
-        _selectedCategories.value = _selectedCategories.value.toMutableSet().apply { if (!add(category)) remove(category) }
+    fun selectLocation(locationId: Long) {
+        _selectedLocationId.value = locationId
+        savedStateHandle[KEY_GEN_LOCATION_ID] = locationId
         invalidateGeneratorPreview()
     }
-    fun clearCategories() { _selectedCategories.value = emptySet(); invalidateGeneratorPreview() }
+    fun updateDuration(minutes: Int) {
+        _durationMinutes.value = minutes
+        savedStateHandle[KEY_GEN_DURATION_MINUTES] = minutes
+        invalidateGeneratorPreview()
+    }
+    fun selectTimeSlot(timeSlot: TimeSlot) {
+        _selectedTimeSlot.value = timeSlot
+        savedStateHandle[KEY_GEN_TIME_SLOT] = timeSlot.name
+        invalidateGeneratorPreview()
+    }
+    fun toggleCategory(category: WorkoutCategory) {
+        _selectedCategories.value = _selectedCategories.value.toMutableSet().apply { if (!add(category)) remove(category) }
+        savedStateHandle[KEY_GEN_CATEGORIES_JSON] = encodeGeneratorCategorySelection(_selectedCategories.value)
+        invalidateGeneratorPreview()
+    }
+    fun clearCategories() {
+        _selectedCategories.value = emptySet()
+        savedStateHandle[KEY_GEN_CATEGORIES_JSON] = encodeGeneratorCategorySelection(emptySet())
+        invalidateGeneratorPreview()
+    }
+
+    /**
+     * Explicit "start fresh" action for the generator setup: clears every selection (location,
+     * duration, time slot, categories) plus their SavedStateHandle-restored values and discards
+     * the current preview. Never touches an already-generated/saved session - only the in-progress
+     * setup screen.
+     */
+    fun resetGeneratorSetup() {
+        _selectedLocationId.value = null
+        _durationMinutes.value = null
+        _selectedCategories.value = emptySet()
+        _selectedTimeSlot.value = TimeSlot.ANYTIME
+        savedStateHandle.remove<Long>(KEY_GEN_LOCATION_ID)
+        savedStateHandle.remove<Int>(KEY_GEN_DURATION_MINUTES)
+        savedStateHandle.remove<String>(KEY_GEN_CATEGORIES_JSON)
+        savedStateHandle.remove<String>(KEY_GEN_TIME_SLOT)
+        invalidateGeneratorPreview()
+    }
+
+    /** Re-runs whichever generator action last failed, so the error surface's retry stays honest. */
+    fun retryLastGeneratorAction() {
+        when (_lastFailedGeneratorAction.value) {
+            GeneratorAction.PREVIEW -> previewWorkout()
+            GeneratorAction.GENERATE -> generateWorkout()
+            GeneratorAction.SAVE_PLAN -> {
+                val input = _lastFailedSavePlanInput.value
+                if (input != null) savePreviewAsPlan(input.name, input.description)
+            }
+            null -> Unit
+        }
+    }
+
     fun clearGeneratedSession() { _generatedSessionId.value = null }
     fun clearCompletedWorkout() { _completedWorkoutId.value = null }
-    fun clearGeneratorError() { _generationError.value = null }
+    fun clearGeneratorError() {
+        _generationError.value = null
+        _lastFailedGeneratorAction.value = null
+        _lastFailedSavePlanInput.value = null
+    }
     fun clearActiveWorkoutError() { _activeWorkoutError.value = null }
     fun clearPlanSaveMessage() { _planSaveMessage.value = null }
 
@@ -506,13 +584,21 @@ class WorkoutViewModel @Inject constructor(
     }
 
     fun previewWorkout() {
+        // Defensive guard alongside the disabled button: a double-tap that lands before
+        // recomposition disables the button must not fire the preview call twice.
+        if (!canDispatchGeneratorAction(_isGenerating.value, _isPreviewing.value, _isSavingPlan.value)) return
         viewModelScope.launch {
             if (_previewFeedbackSessionId.value == null) {
                 _previewFeedbackSessionId.value = -System.currentTimeMillis()
             }
             _isPreviewing.value = true; _generationError.value = null; _generationWarning.value = null
+            _lastFailedGeneratorAction.value = null; _lastFailedSavePlanInput.value = null
             try { _previewDraft.value = workoutPlanner.previewWorkout(currentGenerationParams()) }
-            catch (e: Exception) { _previewDraft.value = null; _generationError.value = e.message ?: "Preview failed." }
+            catch (e: Exception) {
+                _previewDraft.value = null
+                _generationError.value = e.message ?: "Preview failed."
+                _lastFailedGeneratorAction.value = GeneratorAction.PREVIEW
+            }
             finally { _isPreviewing.value = false }
         }
     }
@@ -545,30 +631,50 @@ class WorkoutViewModel @Inject constructor(
     }
 
     fun generateWorkout() {
+        // Same double-dispatch guard as previewWorkout(): never start a second commit while one
+        // is already in flight, so generation failure can never race a successful commit.
+        if (!canDispatchGeneratorAction(_isGenerating.value, _isPreviewing.value, _isSavingPlan.value)) return
         viewModelScope.launch {
             _isGenerating.value = true; _generationError.value = null; _generationWarning.value = null
+            _lastFailedGeneratorAction.value = null; _lastFailedSavePlanInput.value = null
             try {
                 val result = workoutPlanner.generateAndSaveWorkout(currentGenerationParams())
                 _previewDraft.value = result.draft; _generatedSessionId.value = result.sessionId
-            } catch (e: Exception) { _generationError.value = e.message ?: "Generation failed." }
+            } catch (e: Exception) {
+                _generationError.value = e.message ?: "Generation failed."
+                _lastFailedGeneratorAction.value = GeneratorAction.GENERATE
+            }
             finally { _isGenerating.value = false }
         }
     }
 
     fun savePreviewAsPlan(name: String, description: String = "") {
+        // Same double-dispatch guard as previewWorkout()/generateWorkout(): a double-tap that
+        // lands before recomposition disables the Save button can't fire a second save, and a
+        // retry from the error card can't overlap with the dialog's own in-flight save.
+        if (!canDispatchGeneratorAction(_isGenerating.value, _isPreviewing.value, _isSavingPlan.value)) return
         val draft = _previewDraft.value ?: return
+        val input = SaveWorkoutPlanTemplateInput(name = name, description = description)
         viewModelScope.launch {
             _isSavingPlan.value = true
             _planSaveMessage.value = null
+            _generationError.value = null
+            _lastFailedGeneratorAction.value = null
             try {
                 workoutPlanner.saveDraftAsTemplate(
                     draft = draft,
-                    input = SaveWorkoutPlanTemplateInput(name = name, description = description),
+                    input = input,
                     phase = generatorUiState.value.currentPhase
                 )
                 _planSaveMessage.value = "Saved \"${name.ifBlank { draft.session.name }}\" as a reusable plan."
+                _lastFailedSavePlanInput.value = null
             } catch (e: Exception) {
+                // Preserve the attempted name/description so "Try again" on the error card can
+                // re-invoke the save with the exact same input, even after the dialog (which only
+                // holds this in local remember state) has been dismissed.
+                _lastFailedSavePlanInput.value = input
                 _generationError.value = e.message ?: "Failed to save workout plan."
+                _lastFailedGeneratorAction.value = GeneratorAction.SAVE_PLAN
             } finally {
                 _isSavingPlan.value = false
             }
@@ -803,11 +909,14 @@ class WorkoutViewModel @Inject constructor(
     private suspend fun refreshPreviewKeepingReviewSession() {
         _isPreviewing.value = true
         _generationError.value = null
+        _lastFailedGeneratorAction.value = null
+        _lastFailedSavePlanInput.value = null
         try {
             _previewDraft.value = workoutPlanner.previewWorkout(currentGenerationParams())
         } catch (e: Exception) {
             _previewDraft.value = null
             _generationError.value = e.message ?: "Preview failed."
+            _lastFailedGeneratorAction.value = GeneratorAction.PREVIEW
         } finally {
             _isPreviewing.value = false
         }
@@ -817,6 +926,8 @@ class WorkoutViewModel @Inject constructor(
         _previewDraft.value = null
         _generationError.value = null
         _generationWarning.value = null
+        _lastFailedGeneratorAction.value = null
+        _lastFailedSavePlanInput.value = null
         _excludedPreviewExerciseIds.value = emptySet()
         _previewFeedbackSessionId.value = null
     }
@@ -984,24 +1095,33 @@ class WorkoutViewModel @Inject constructor(
             result.value.toSet()
         }
 
-    private companion object {
+    internal companion object {
         const val KEY_DRAFTS_SESSION_ID = "activeWorkout_draftsSessionId"
         const val KEY_DRAFTS_JSON = "activeWorkout_draftsJson"
         const val KEY_FOCUSED_EXERCISE_ID = "activeWorkout_focusedExerciseId"
+        const val KEY_GEN_LOCATION_ID = "generator_selectedLocationId"
+        const val KEY_GEN_DURATION_MINUTES = "generator_durationMinutes"
+        const val KEY_GEN_CATEGORIES_JSON = "generator_selectedCategoriesJson"
+        const val KEY_GEN_TIME_SLOT = "generator_selectedTimeSlot"
     }
 }
+
+/** Which generator call last failed, so the error surface's retry action can re-run the right one. */
+enum class GeneratorAction { PREVIEW, GENERATE, SAVE_PLAN }
 
 // ========== Internal state helpers ==========
 private data class GeneratorBaseState(
     val locations: List<EquipmentLocation> = emptyList(), val selectedLocationId: Long? = null,
     val defaultLocationId: Long? = null, val durationMinutes: Int = 60, val currentPhase: TrainingPhase = TrainingPhase.BALANCED,
-    val excludedPreviewExerciseIds: Set<Long> = emptySet()
+    val excludedPreviewExerciseIds: Set<Long> = emptySet(),
+    val hasSavedProfile: Boolean = false
 )
 private data class GeneratorSelectionState(val base: GeneratorBaseState, val selectedCategories: List<WorkoutCategory>, val selectedTimeSlot: TimeSlot)
 private data class GeneratorStatusState(
     val isGenerating: Boolean = false,
     val isPreviewing: Boolean = false,
     val error: String? = null,
+    val lastFailedAction: GeneratorAction? = null,
     val warning: String? = null,
     val generatedSessionId: Long? = null,
     val previewDraft: WorkoutPlanDraft? = null,
@@ -1022,9 +1142,11 @@ data class WorkoutOverviewUiState(
 data class WorkoutGeneratorUiState(
     val locations: List<EquipmentLocation> = emptyList(), val selectedLocationId: Long? = null, val durationMinutes: Int = 60,
     val selectedCategories: List<WorkoutCategory> = emptyList(), val selectedTimeSlot: TimeSlot = TimeSlot.ANYTIME,
-    val currentPhase: TrainingPhase = TrainingPhase.BALANCED, val excludedExerciseIds: Set<Long> = emptySet(),
+    val currentPhase: TrainingPhase = TrainingPhase.BALANCED, val hasSavedProfile: Boolean = false,
+    val excludedExerciseIds: Set<Long> = emptySet(),
     val isGenerating: Boolean = false, val isPreviewing: Boolean = false,
-    val error: String? = null, val warning: String? = null, val generatedSessionId: Long? = null, val previewDraft: WorkoutPlanDraft? = null,
+    val error: String? = null, val warning: String? = null, val lastFailedAction: GeneratorAction? = null,
+    val generatedSessionId: Long? = null, val previewDraft: WorkoutPlanDraft? = null,
     val hasPreviewCustomizations: Boolean = false,
     val isSavingPlan: Boolean = false,
     val planSaveMessage: String? = null,

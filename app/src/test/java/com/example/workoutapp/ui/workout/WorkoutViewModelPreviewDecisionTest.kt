@@ -1,7 +1,9 @@
 package com.example.workoutapp.ui.workout
 
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.lifecycle.SavedStateHandle
 import androidx.room.InvalidationTracker
+import com.example.workoutapp.data.local.UserPreferencesDataStore
 import com.example.workoutapp.data.local.WorkoutDatabase
 import com.example.workoutapp.data.local.dao.EquipmentDao
 import com.example.workoutapp.data.local.dao.ExerciseDao
@@ -116,7 +118,12 @@ class WorkoutViewModelPreviewDecisionTest {
 
         val exerciseRepository = ExerciseRepository(exerciseDao)
         val equipmentRepository = EquipmentRepository(equipmentDao)
-        val userGoalRepository = UserGoalRepository(userGoalDao)
+        val userPreferencesDataStore = UserPreferencesDataStore(
+            PreferenceDataStoreFactory.create(
+                produceFile = { java.io.File.createTempFile("prefs_", ".preferences_pb") }
+            )
+        )
+        val userGoalRepository = UserGoalRepository(userGoalDao, userPreferencesDataStore)
         val feedbackRepository = MLFeedbackRepository(feedbackDao)
         val database = FakeWorkoutDatabase(
             exerciseDao = exerciseDao,

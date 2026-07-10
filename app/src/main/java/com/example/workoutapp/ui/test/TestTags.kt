@@ -57,6 +57,21 @@ object TestTags {
     object Workout {
         const val Screen = "workout_screen"
         const val NewPlanButton = "workout_new_plan_button"
+        const val NewWorkoutFab = "workout_new_workout_fab"
+    }
+
+    object WorkoutGenerator {
+        const val Screen = "workout_generator_screen"
+        const val ContentList = "workout_generator_content"
+        const val SummaryCard = "workout_generator_summary_card"
+        const val PrimaryActionButton = "workout_generator_primary_action_button"
+        const val AdvancedToggle = "workout_generator_advanced_toggle"
+        const val PreviewButton = "workout_generator_preview_button"
+        const val ResetDefaultsButton = "workout_generator_reset_defaults_button"
+        const val ErrorRetryButton = "workout_generator_error_retry_button"
+        const val ErrorDismissButton = "workout_generator_error_dismiss_button"
+        const val EditSetupButton = "workout_generator_edit_setup_button"
+        const val PreviewCard = "workout_generator_preview_card"
     }
 
     object WorkoutPlanEditor {

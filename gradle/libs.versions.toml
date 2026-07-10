@@ -21,6 +21,7 @@ datastore = "1.0.0"
 kotlinxCoroutines = "1.7.3"
 kotlinxSerialization = "1.6.2"
 ksp = "2.0.21-1.0.27"
+mockk = "1.13.11"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -69,6 +70,8 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycleRuntimeKtx" }
 # Material Icons Extended
 androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
+# Testing (JVM unit tests only)
+mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 androidx-room = { id = "androidx.room", version.ref = "room" }

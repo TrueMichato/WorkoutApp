@@ -1,5 +1,6 @@
 package com.example.workoutapp.data.repository
 
+import com.example.workoutapp.data.local.UserPreferencesDataStore
 import com.example.workoutapp.data.local.dao.UserGoalDao
 import com.example.workoutapp.data.model.*
 import kotlinx.coroutines.flow.Flow
@@ -9,22 +10,32 @@ import javax.inject.Singleton
 
 @Singleton
 class UserGoalRepository @Inject constructor(
-    private val userGoalDao: UserGoalDao
+    private val userGoalDao: UserGoalDao,
+    private val userPreferencesDataStore: UserPreferencesDataStore
 ) {
     suspend fun getUserGoal(): UserGoal = userGoalDao.get() ?: UserGoal()
 
     fun getUserGoalFlow(): Flow<UserGoal?> = userGoalDao.getFlow()
 
+    /**
+     * True only once the user has intentionally saved/customized their training profile through
+     * Settings. The seeded default `UserGoal()` row present on every fresh install does NOT make
+     * this true - see `UserPreferencesDataStore` for why row presence alone can't be trusted.
+     */
+    fun hasCustomizedProfileFlow(): Flow<Boolean> = userPreferencesDataStore.hasCustomizedProfile
+
     suspend fun updateUserGoal(goal: UserGoal) = userGoalDao.update(goal)
 
     suspend fun setTrainingPhase(phase: TrainingPhase, endDate: Long? = null) {
         userGoalDao.updatePhase(phase, System.currentTimeMillis(), endDate)
+        userPreferencesDataStore.markProfileCustomized()
     }
 
     suspend fun setCategoryWeights(weights: Map<WorkoutCategory, Float>) {
         val weightsMap = weights.mapKeys { it.key.name }
         val weightsJson = persistedJson.encodeToString(weightsMap)
         userGoalDao.updateCategoryWeights(weightsJson)
+        userPreferencesDataStore.markProfileCustomized()
     }
 
     suspend fun getCategoryWeights(): Map<WorkoutCategory, Float> {
