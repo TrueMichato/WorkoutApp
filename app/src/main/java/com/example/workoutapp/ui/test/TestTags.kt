@@ -57,10 +57,12 @@ object TestTags {
     object Workout {
         const val Screen = "workout_screen"
         const val NewPlanButton = "workout_new_plan_button"
+        const val NewWorkoutFab = "workout_new_workout_fab"
     }
 
     object WorkoutGenerator {
         const val Screen = "workout_generator_screen"
+        const val ContentList = "workout_generator_content"
         const val SummaryCard = "workout_generator_summary_card"
         const val PrimaryActionButton = "workout_generator_primary_action_button"
         const val AdvancedToggle = "workout_generator_advanced_toggle"

@@ -2,11 +2,14 @@ package com.example.workoutapp
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.workoutapp.data.local.WorkoutDatabase
 import com.example.workoutapp.data.model.Difficulty
@@ -100,9 +103,9 @@ class WorkoutGeneratorSetupFlowTest {
     }
 
     private fun openGenerator() {
-        composeRule.onNodeWithText("Workout").performClick()
+        composeRule.onNodeWithTag(TestTags.BottomNav.Workout).performClick()
         composeRule.onNodeWithTag(TestTags.Workout.Screen).assertIsDisplayed()
-        composeRule.onNodeWithText("New Workout").performClick()
+        composeRule.onNodeWithTag(TestTags.Workout.NewWorkoutFab).performClick()
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.Screen).assertIsDisplayed()
     }
 
@@ -113,8 +116,10 @@ class WorkoutGeneratorSetupFlowTest {
         // Both the honest defaults summary and the single primary action must be visible
         // immediately - no scrolling, no expanding Advanced first.
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.SummaryCard).assertIsDisplayed()
-        composeRule.onNodeWithTag(TestTags.WorkoutGenerator.PrimaryActionButton).assertIsDisplayed()
-        composeRule.onNodeWithText("Generate Workout").assertIsDisplayed()
+        // The primary action's own label is checked scoped to its tag - the top app bar title
+        // ("Generate Workout") shares the same text, so a bare onNodeWithText would be ambiguous.
+        composeRule.onNode(hasTestTag(TestTags.WorkoutGenerator.PrimaryActionButton) and hasText("Generate Workout"))
+            .assertIsDisplayed()
 
         // Advanced controls are not visible until the user opts in.
         composeRule.onAllNodesWithTag(TestTags.WorkoutGenerator.ResetDefaultsButton)
@@ -127,15 +132,21 @@ class WorkoutGeneratorSetupFlowTest {
         openGenerator()
 
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.AdvancedToggle).performClick()
+        composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.WorkoutGenerator.ResetDefaultsButton))
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ResetDefaultsButton).assertIsDisplayed()
 
         composeRule.onNodeWithText("Strength").performClick()
 
         // Collapse, then reopen - the selection must still be reflected.
+        composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.WorkoutGenerator.AdvancedToggle))
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.AdvancedToggle).performClick()
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ResetDefaultsButton).assertIsNotDisplayed()
 
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.AdvancedToggle).performClick()
+        composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.WorkoutGenerator.ResetDefaultsButton))
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ResetDefaultsButton).assertIsDisplayed()
         composeRule.onNodeWithText("Clear").assertIsDisplayed()
     }
@@ -145,22 +156,34 @@ class WorkoutGeneratorSetupFlowTest {
         openGenerator()
 
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.AdvancedToggle).performClick()
+        composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.WorkoutGenerator.PreviewButton))
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.PreviewButton).performClick()
 
         composeRule.waitUntil(timeoutMillis = 5_000) {
             composeRule.onAllNodesWithTag(TestTags.WorkoutGenerator.PreviewCard).fetchSemanticsNodes().isNotEmpty()
         }
+        composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.WorkoutGenerator.PreviewCard))
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.PreviewCard).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.EditSetupButton).assertIsDisplayed()
 
         // Collapse Advanced - the preview must remain visible on its own.
+        composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.WorkoutGenerator.AdvancedToggle))
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.AdvancedToggle).performClick()
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ResetDefaultsButton).assertIsNotDisplayed()
+        composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.WorkoutGenerator.PreviewCard))
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.PreviewCard).assertIsDisplayed()
 
         // Edit setup reopens Advanced from the preview card, without navigating away or losing it.
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.EditSetupButton).performClick()
+        composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.WorkoutGenerator.ResetDefaultsButton))
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ResetDefaultsButton).assertIsDisplayed()
+        composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.WorkoutGenerator.PreviewCard))
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.PreviewCard).assertIsDisplayed()
     }
 }

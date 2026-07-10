@@ -145,7 +145,8 @@ fun WorkoutScreen(
             androidx.compose.material3.ExtendedFloatingActionButton(
                 onClick = onNavigateToGenerateWorkout,
                 icon = { Icon(Icons.Default.AutoAwesome, null) },
-                text = { Text("New Workout") }
+                text = { Text("New Workout") },
+                modifier = Modifier.testTag(TestTags.Workout.NewWorkoutFab)
             )
         }
     ) { paddingValues ->
@@ -339,7 +340,8 @@ fun WorkoutGeneratorScreen(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(paddingValues),
+                    .padding(paddingValues)
+                    .testTag(TestTags.WorkoutGenerator.ContentList),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
