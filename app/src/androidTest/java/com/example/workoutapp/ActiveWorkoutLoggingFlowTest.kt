@@ -2,6 +2,7 @@ package com.example.workoutapp
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -114,6 +115,8 @@ class ActiveWorkoutLoggingFlowTest {
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
             .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.SaveSetButton))
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.SaveSetButton).performClick()
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
+            .performScrollToNode(hasText("Reps can't be negative"))
         composeRule.onNodeWithText("Reps can't be negative").assertIsDisplayed()
 
         // Correcting the input and saving succeeds and shows the logged set.
@@ -124,6 +127,8 @@ class ActiveWorkoutLoggingFlowTest {
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
             .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.SaveSetButton))
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.SaveSetButton).performClick()
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
+            .performScrollToNode(hasText("Logged sets"))
         composeRule.onNodeWithText("Logged sets").assertIsDisplayed()
 
         // Done/Skip remain explicit, separate actions from logging a set.
