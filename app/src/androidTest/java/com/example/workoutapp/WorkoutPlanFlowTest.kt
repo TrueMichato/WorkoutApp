@@ -1,11 +1,13 @@
 package com.example.workoutapp
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.workoutapp.data.local.WorkoutDatabase
@@ -92,9 +94,13 @@ class WorkoutPlanFlowTest {
 
         composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.Screen).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.NameField).performTextInput(planName)
+        composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.WorkoutPlanEditor.AddExerciseButton))
         composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.AddExerciseButton).performClick()
         composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.ExerciseSearchField).performTextInput(exerciseName)
         composeRule.onNodeWithText(exerciseName).performClick()
+        composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.WorkoutPlanEditor.SaveAndPlayButton))
         composeRule.onNodeWithTag(TestTags.WorkoutPlanEditor.SaveAndPlayButton).performClick()
 
         composeRule.waitUntil(timeoutMillis = 5_000) {
@@ -107,5 +113,4 @@ class WorkoutPlanFlowTest {
         composeRule.onNodeWithText("RPE 8").assertIsDisplayed()
     }
 }
-
 

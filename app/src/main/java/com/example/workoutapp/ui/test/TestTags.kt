@@ -46,6 +46,7 @@ object TestTags {
 
     object WorkoutPlanEditor {
         const val Screen = "workout_plan_editor_screen"
+        const val ContentList = "workout_plan_editor_content"
         const val NameField = "workout_plan_editor_name"
         const val DescriptionField = "workout_plan_editor_description"
         const val NotesField = "workout_plan_editor_notes"
