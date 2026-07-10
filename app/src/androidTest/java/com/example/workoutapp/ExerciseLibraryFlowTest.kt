@@ -44,7 +44,7 @@ class ExerciseLibraryFlowTest {
     fun addExerciseFlow_savesExerciseAndShowsItInLibrary() {
         val exerciseName = "UI Test Push-up ${System.currentTimeMillis()}"
 
-        composeRule.onNodeWithText("Exercises").performClick()
+        composeRule.onNodeWithTag(TestTags.BottomNav.Exercises).performClick()
         composeRule.onNodeWithTag(TestTags.Exercises.Screen).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.Exercises.AddFab).performClick()
 
@@ -59,5 +59,4 @@ class ExerciseLibraryFlowTest {
         composeRule.onNodeWithText(exerciseName).assertIsDisplayed()
     }
 }
-
 

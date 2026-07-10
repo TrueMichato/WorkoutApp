@@ -53,6 +53,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,6 +67,7 @@ import com.example.workoutapp.data.model.WorkoutCategory
 import com.example.workoutapp.data.model.displaySummary
 import com.example.workoutapp.data.model.resolveBalancedProgrammingPreset
 import com.example.workoutapp.data.model.toRichPrescriptionData
+import com.example.workoutapp.ui.test.TestTags
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -103,6 +105,7 @@ fun WorkoutPlanEditorScreen(
     }
 
     Scaffold(
+        modifier = Modifier.testTag(TestTags.WorkoutPlanEditor.Screen),
         topBar = {
             TopAppBar(
                 title = { Text(if (templateId == null) "New Workout Plan" else "Edit Workout Plan") },
@@ -184,14 +187,18 @@ fun WorkoutPlanEditorScreen(
                                     value = uiState.name,
                                     onValueChange = viewModel::updatePlanEditorName,
                                     label = { Text("Plan name") },
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag(TestTags.WorkoutPlanEditor.NameField),
                                     singleLine = true
                                 )
                                 OutlinedTextField(
                                     value = uiState.description,
                                     onValueChange = viewModel::updatePlanEditorDescription,
                                     label = { Text("Description") },
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag(TestTags.WorkoutPlanEditor.DescriptionField),
                                     minLines = 2,
                                     maxLines = 3
                                 )
@@ -199,7 +206,9 @@ fun WorkoutPlanEditorScreen(
                                     value = uiState.notes,
                                     onValueChange = viewModel::updatePlanEditorNotes,
                                     label = { Text("Plan notes") },
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag(TestTags.WorkoutPlanEditor.NotesField),
                                     minLines = 2,
                                     maxLines = 4
                                 )
@@ -317,7 +326,10 @@ fun WorkoutPlanEditorScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
-                            Button(onClick = { showAddExerciseDialog = true }) {
+                            Button(
+                                onClick = { showAddExerciseDialog = true },
+                                modifier = Modifier.testTag(TestTags.WorkoutPlanEditor.AddExerciseButton)
+                            ) {
                                 Icon(Icons.Default.Add, null)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Add")
@@ -387,7 +399,9 @@ fun WorkoutPlanEditorScreen(
                             OutlinedButton(
                                 onClick = viewModel::savePlanEditor,
                                 enabled = !uiState.isSaving,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag(TestTags.WorkoutPlanEditor.SaveButton)
                             ) {
                                 if (uiState.isSaving) {
                                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -398,7 +412,9 @@ fun WorkoutPlanEditorScreen(
                             Button(
                                 onClick = viewModel::playPlanFromEditor,
                                 enabled = !uiState.isSaving,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag(TestTags.WorkoutPlanEditor.SaveAndPlayButton)
                             ) {
                                 Icon(Icons.Default.PlayArrow, null)
                                 Spacer(modifier = Modifier.width(8.dp))
@@ -632,7 +648,9 @@ private fun AddExerciseToPlanDialog(
                     value = query,
                     onValueChange = { query = it },
                     label = { Text("Search") },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(TestTags.WorkoutPlanEditor.ExerciseSearchField),
                     singleLine = true
                 )
                 if (available.isEmpty()) {
@@ -692,6 +710,5 @@ private fun AddExerciseToPlanDialog(
         }
     )
 }
-
 
 

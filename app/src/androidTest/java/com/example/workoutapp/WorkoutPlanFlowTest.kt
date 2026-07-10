@@ -86,7 +86,7 @@ class WorkoutPlanFlowTest {
             )
         }
 
-        composeRule.onNodeWithText("Workout").performClick()
+        composeRule.onNodeWithTag(TestTags.BottomNav.Workout).performClick()
         composeRule.onNodeWithTag(TestTags.Workout.Screen).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.Workout.NewPlanButton).performClick()
 
@@ -107,6 +107,5 @@ class WorkoutPlanFlowTest {
         composeRule.onNodeWithText("RPE 8").assertIsDisplayed()
     }
 }
-
 
 

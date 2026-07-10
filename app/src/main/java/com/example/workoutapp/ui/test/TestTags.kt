@@ -5,6 +5,16 @@ import com.example.workoutapp.data.model.TrainingPhase
 import com.example.workoutapp.data.model.WorkoutCategory
 
 object TestTags {
+    object BottomNav {
+        const val Dashboard = "bottom_nav_dashboard"
+        const val Exercises = "bottom_nav_exercises"
+        const val Workout = "bottom_nav_workout"
+        const val PhysicalTherapy = "bottom_nav_physical_therapy"
+        const val Settings = "bottom_nav_settings"
+
+        fun item(route: String): String = "bottom_nav_$route"
+    }
+
     object Exercises {
         const val Screen = "exercises_screen"
         const val SearchField = "exercises_search_field"
