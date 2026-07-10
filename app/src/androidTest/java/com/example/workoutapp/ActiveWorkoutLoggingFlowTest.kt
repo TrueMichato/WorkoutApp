@@ -20,6 +20,7 @@ import com.example.workoutapp.ui.test.TestTags
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import javax.inject.Inject
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -95,6 +96,13 @@ class ActiveWorkoutLoggingFlowTest {
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithTag(TestTags.ActiveWorkout.ContentList).fetchSemanticsNodes().isNotEmpty()
         }
+        val sessionExerciseId = runBlocking {
+            val session = database.workoutSessionDao().getAll().first().single { it.name == planName }
+            database.workoutSessionDao()
+                .getExercisesForSessionSync(session.id)
+                .single { it.exerciseId == exerciseId }
+                .id
+        }
 
         // The single planned exercise becomes the dominant "current exercise" card.
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
@@ -111,6 +119,11 @@ class ActiveWorkoutLoggingFlowTest {
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
             .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.SaveSetButton))
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.SaveSetButton).performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            runBlocking {
+                database.workoutSessionDao().getSetLogsForExerciseSync(sessionExerciseId).isNotEmpty()
+            }
+        }
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
             .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.RepeatLastSetButton))
         composeRule.onNodeWithText("Logged sets").assertIsDisplayed()
