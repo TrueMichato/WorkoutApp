@@ -1,6 +1,7 @@
 package com.example.workoutapp.ui.exercises
 
 import android.net.Uri
+import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.workoutapp.data.model.Difficulty
@@ -62,7 +63,7 @@ class AddEditExerciseViewModel @Inject constructor(
             }
 
             val localUris = try {
-                json.decodeFromString<List<String>>(exercise.localMediaUris).map { Uri.parse(it) }
+                json.decodeFromString<List<String>>(exercise.localMediaUris).map { it.toUri() }
             } catch (_: Exception) {
                 emptyList()
             }
@@ -332,6 +333,8 @@ class AddEditExerciseViewModel @Inject constructor(
     fun saveExercise() {
         val state = _uiState.value
 
+        if (state.isSaving) return
+
         if (state.name.isBlank()) {
             _uiState.update { it.copy(nameError = "Name is required") }
             return
@@ -366,16 +369,23 @@ class AddEditExerciseViewModel @Inject constructor(
                     updatedAt = System.currentTimeMillis()
                 )
 
-                val exerciseId = if (editingExerciseId != null) {
-                    exerciseRepository.updateExercise(exercise)
-                    editingExerciseId!!
+                if (editingExerciseId != null) {
+                    exerciseRepository.updateExerciseWithRelations(
+                        exercise = exercise,
+                        categories = state.selectedCategories.toList(),
+                        equipmentIds = state.selectedEquipment.map { it.id },
+                        primaryMuscles = state.primaryMuscles,
+                        secondaryMuscles = state.secondaryMuscles
+                    )
                 } else {
-                    exerciseRepository.insertExercise(exercise)
+                    exerciseRepository.createExerciseWithRelations(
+                        exercise = exercise,
+                        categories = state.selectedCategories.toList(),
+                        equipmentIds = state.selectedEquipment.map { it.id },
+                        primaryMuscles = state.primaryMuscles,
+                        secondaryMuscles = state.secondaryMuscles
+                    )
                 }
-
-                exerciseRepository.setExerciseCategories(exerciseId, state.selectedCategories.toList())
-                exerciseRepository.setExerciseEquipment(exerciseId, state.selectedEquipment.map { it.id })
-                exerciseRepository.setExerciseMuscles(exerciseId, state.primaryMuscles, state.secondaryMuscles)
 
                 _uiState.update { it.copy(isSaving = false, saveSuccess = true) }
             } catch (e: Exception) {

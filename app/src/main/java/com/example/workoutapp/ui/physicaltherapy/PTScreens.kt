@@ -14,6 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.workoutapp.data.model.PTFrequency
 import com.example.workoutapp.data.model.PTSessionLog
 import com.example.workoutapp.data.model.PhysicalTherapyRoutine
@@ -32,7 +33,7 @@ fun PhysicalTherapyScreen(
     onNavigateToAddRoutine: () -> Unit,
     viewModel: PTViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.listUiState.collectAsState()
+    val uiState by viewModel.listUiState.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -226,7 +227,7 @@ fun PTRoutineDetailScreen(
     onNavigateToEdit: (Long) -> Unit,
     viewModel: PTViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.detailUiState.collectAsState()
+    val uiState by viewModel.detailUiState.collectAsStateWithLifecycle()
 
     LaunchedEffect(routineId) { viewModel.loadRoutineDetail(routineId) }
 
@@ -271,7 +272,11 @@ fun PTRoutineDetailScreen(
                                     }
                                 }
                                 uiState.averagePainReduction?.let { avg ->
-                                    val label = when { avg < 0 -> "Pain improves by ${String.format("%.1f", -avg)} pts on average"; avg > 0 -> "Pain worsens by ${String.format("%.1f", avg)} pts on average"; else -> "No average pain change" }
+                                    val label = when {
+                                        avg < 0 -> "Pain improves by ${String.format(Locale.getDefault(), "%.1f", -avg)} pts on average"
+                                        avg > 0 -> "Pain worsens by ${String.format(Locale.getDefault(), "%.1f", avg)} pts on average"
+                                        else -> "No average pain change"
+                                    }
                                     Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
@@ -398,7 +403,7 @@ fun AddPTRoutineScreen(
     onRoutineSaved: (Long) -> Unit = {},
     viewModel: PTViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.editUiState.collectAsState()
+    val uiState by viewModel.editUiState.collectAsStateWithLifecycle()
 
     LaunchedEffect(editRoutineId) {
         if (editRoutineId != null) viewModel.initEditRoutine(editRoutineId) else viewModel.initNewRoutine()

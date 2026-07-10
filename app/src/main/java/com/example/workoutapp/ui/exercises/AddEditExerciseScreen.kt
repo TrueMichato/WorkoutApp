@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.workoutapp.data.model.*
 
@@ -34,7 +35,7 @@ fun AddEditExerciseScreen(
     onNavigateBack: () -> Unit,
     viewModel: AddEditExerciseViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val isEditing = exerciseId != null
 
     // Load exercise if editing
@@ -75,9 +76,13 @@ fun AddEditExerciseScreen(
                 actions = {
                     TextButton(
                         onClick = { viewModel.saveExercise() },
-                        enabled = uiState.name.isNotBlank()
+                        enabled = uiState.name.isNotBlank() && !uiState.isSaving
                     ) {
-                        Text("Save")
+                        if (uiState.isSaving) {
+                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Text("Save")
+                        }
                     }
                 }
             )

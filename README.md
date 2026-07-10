@@ -5,6 +5,10 @@ A local-first Android workout app focused on two jobs:
 1. tracking what you train
 2. deciding what to train next without losing variety or balance
 
+## Download
+
+[Download the latest APK](https://github.com/TrueMichato/WorkoutApp/releases/latest/download/WorkoutApp.apk) for Android 7.0 or newer.
+
 ## Current phase-8 status
 
 Phase 8 adds **ML Enhancement — On-device learning from user behavior**:
@@ -23,7 +27,7 @@ Phase 8 adds **ML Enhancement — On-device learning from user behavior**:
   - Contextual pattern weight (20%, future)
 - **WorkoutPlanner integration** — ML scores loaded and applied as 20% boost to base rule scores
 - **Feedback recording** — completion feedback automatically updates ML events for learning
-- **TensorFlow Lite** dependency added for future model integration
+- Feature vectors are ready for a future on-device model; the ML runtime is intentionally deferred until a model is shipped
 - **Unit tests**: 12 MLRecommender tests (acceptance rates, confidence, UCB exploration, score combinations)
 
 ### Previous phases
@@ -39,7 +43,9 @@ Phase 8 adds **ML Enhancement — On-device learning from user behavior**:
 
 ```zsh
 ./gradlew :app:compileDebugKotlin
-./gradlew :app:testDebugUnitTest --tests "com.example.workoutapp.domain.*"
+./gradlew :app:testDebugUnitTest
+./gradlew :app:compileDebugAndroidTestKotlin
+./gradlew :app:lintDebug
 ```
 
 ## ML Architecture

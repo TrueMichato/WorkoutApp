@@ -73,7 +73,7 @@ abstract class WorkoutDatabase : RoomDatabase() {
                     DATABASE_NAME
                 )
                     .addCallback(DatabaseCallback())
-                    .fallbackToDestructiveMigration(dropAllTables = true)
+                    // Missing migrations must fail visibly instead of erasing user data.
                     .build()
                 INSTANCE = instance
                 instance

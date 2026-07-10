@@ -96,13 +96,12 @@ class ExerciseCsvImporter @Inject constructor(
                     trainingPhasePresets = json.encodeToString(presets.mapKeys { it.key.name }),
                     personalNotes = record["personal_notes"].orEmpty()
                 )
-                val exerciseId = exerciseRepository.insertExercise(exercise)
-                exerciseRepository.setExerciseCategories(exerciseId, categories)
-                exerciseRepository.setExerciseEquipment(exerciseId, equipmentIds)
-                exerciseRepository.setExerciseMuscles(
-                    exerciseId = exerciseId,
-                    primary = parseMuscles(record["primary_muscles"]),
-                    secondary = parseMuscles(record["secondary_muscles"])
+                exerciseRepository.createExerciseWithRelations(
+                    exercise = exercise,
+                    categories = categories,
+                    equipmentIds = equipmentIds,
+                    primaryMuscles = parseMuscles(record["primary_muscles"]),
+                    secondaryMuscles = parseMuscles(record["secondary_muscles"])
                 )
                 existingNames += normalizedName
                 imported += 1
@@ -289,6 +288,4 @@ private fun tokenize(raw: String?): List<String> =
         .split('|', ';', ',')
         .map { it.trim() }
         .filter { it.isNotBlank() }
-
-
 

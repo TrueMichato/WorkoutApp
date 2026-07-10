@@ -13,7 +13,9 @@ class ExerciseRepository @Inject constructor(
     // Exercise CRUD
     suspend fun insertExercise(exercise: Exercise): Long = exerciseDao.insert(exercise)
 
-    suspend fun updateExercise(exercise: Exercise) = exerciseDao.update(exercise)
+    suspend fun updateExercise(exercise: Exercise) {
+        check(exerciseDao.update(exercise) == 1) { "Exercise ${exercise.id} no longer exists." }
+    }
 
     suspend fun deleteExercise(exercise: Exercise) = exerciseDao.delete(exercise)
 
@@ -101,7 +103,7 @@ class ExerciseRepository @Inject constructor(
     suspend fun deleteCustomCategory(category: CustomCategory) = exerciseDao.deleteCustomCategory(category)
 
     // Stats
-    suspend fun getActiveExerciseCount(): Int = exerciseDao.getActiveCount()
+    fun getActiveExerciseCount(): Flow<Int> = exerciseDao.getActiveCount()
 
     suspend fun getFavoriteExerciseCount(): Int = exerciseDao.getFavoriteCount()
 
@@ -115,11 +117,28 @@ class ExerciseRepository @Inject constructor(
         primaryMuscles: List<MuscleGroup>,
         secondaryMuscles: List<MuscleGroup> = emptyList()
     ): Long {
-        val exerciseId = exerciseDao.insert(exercise)
-        setExerciseCategories(exerciseId, categories)
-        setExerciseEquipment(exerciseId, equipmentIds)
-        setExerciseMuscles(exerciseId, primaryMuscles, secondaryMuscles)
-        return exerciseId
+        return exerciseDao.insertWithRelations(
+            exercise = exercise,
+            categories = categories,
+            equipmentIds = equipmentIds,
+            primaryMuscles = primaryMuscles,
+            secondaryMuscles = secondaryMuscles
+        )
+    }
+
+    suspend fun updateExerciseWithRelations(
+        exercise: Exercise,
+        categories: List<WorkoutCategory>,
+        equipmentIds: List<Long>,
+        primaryMuscles: List<MuscleGroup>,
+        secondaryMuscles: List<MuscleGroup> = emptyList()
+    ) {
+        exerciseDao.updateWithRelations(
+            exercise = exercise,
+            categories = categories,
+            equipmentIds = equipmentIds,
+            primaryMuscles = primaryMuscles,
+            secondaryMuscles = secondaryMuscles
+        )
     }
 }
-

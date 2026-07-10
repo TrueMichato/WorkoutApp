@@ -15,9 +15,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.workoutapp.data.local.ExerciseStorageInfo
 import com.example.workoutapp.data.model.TrainingPhase
 import com.example.workoutapp.data.model.WorkoutCategory
+import java.util.Locale
 
 // ═══════════════════════════════════════════════════════════════════════
 // Main Settings Screen (unchanged except for imports)
@@ -39,11 +41,11 @@ fun SettingsScreen(
             item { SettingsItem(Icons.Default.FitnessCenter, "Equipment & Locations", "Manage your gym setups", onNavigateToEquipment) }
             item { SettingsSection("Data") }
             item { SettingsItem(Icons.Default.Storage, "Storage Management", "Manage media files and cleanup", onNavigateToStorage) }
-            item { SettingsItem(Icons.Default.Backup, "Backup & Restore", "Export and import your data") { /* TODO */ } }
+            item { SettingsItem(Icons.Default.Backup, "Backup & Restore", "Export and import your data", status = "Soon") }
             item { SettingsSection("App") }
-            item { SettingsItem(Icons.Default.Palette, "Appearance", "Theme and display settings") { /* TODO */ } }
-            item { SettingsItem(Icons.Default.Notifications, "Notifications", "Workout and PT reminders") { /* TODO */ } }
-            item { SettingsItem(Icons.Default.Info, "About", "Version 1.0.0") { /* TODO */ } }
+            item { SettingsItem(Icons.Default.Palette, "Appearance", "Theme and display settings", status = "Soon") }
+            item { SettingsItem(Icons.Default.Notifications, "Notifications", "Workout and PT reminders", status = "Soon") }
+            item { SettingsItem(Icons.Default.Info, "About", "Version 1.0") }
         }
     }
 }
@@ -54,13 +56,25 @@ private fun SettingsSection(title: String) {
 }
 
 @Composable
-private fun SettingsItem(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
+private fun SettingsItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: (() -> Unit)? = null,
+    status: String? = null
+) {
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = { Text(subtitle) },
         leadingContent = { Icon(icon, null) },
-        trailingContent = { Icon(Icons.Default.ChevronRight, null) },
-        modifier = Modifier.clickable(onClick = onClick)
+        trailingContent = {
+            if (status != null) {
+                Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (onClick != null) {
+                Icon(Icons.Default.ChevronRight, null)
+            }
+        },
+        modifier = if (onClick != null) Modifier.clickable { onClick() } else Modifier
     )
 }
 
@@ -74,7 +88,7 @@ fun GoalSettingsScreen(
     onNavigateBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
-    val state by viewModel.goalState.collectAsState()
+    val state by viewModel.goalState.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -151,7 +165,7 @@ private fun CategoryWeightSlider(category: WorkoutCategory, weight: Float, onWei
                 Spacer(Modifier.width(8.dp))
                 Text(category.displayName, style = MaterialTheme.typography.bodyMedium)
             }
-            Text(String.format("%.1fx", weight), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            Text(String.format(Locale.getDefault(), "%.1fx", weight), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
         }
         Slider(
             value = weight,
@@ -172,7 +186,7 @@ fun StorageSettingsScreen(
     onNavigateBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
-    val state by viewModel.storageState.collectAsState()
+    val state by viewModel.storageState.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {

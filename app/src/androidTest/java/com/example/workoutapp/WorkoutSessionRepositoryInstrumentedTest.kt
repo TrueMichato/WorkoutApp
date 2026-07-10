@@ -3,7 +3,9 @@ package com.example.workoutapp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.workoutapp.data.local.WorkoutDatabase
 import com.example.workoutapp.data.model.Difficulty
+import com.example.workoutapp.data.model.Equipment
 import com.example.workoutapp.data.model.Exercise
+import com.example.workoutapp.data.model.MuscleGroup
 import com.example.workoutapp.data.model.PlanExerciseSection
 import com.example.workoutapp.data.model.RichPrescriptionData
 import com.example.workoutapp.data.model.TimeSlot
@@ -11,9 +13,11 @@ import com.example.workoutapp.data.model.TrainingPhase
 import com.example.workoutapp.data.model.WorkoutCategory
 import com.example.workoutapp.data.model.WorkoutPlanTemplate
 import com.example.workoutapp.data.model.WorkoutPlanTemplateExercise
+import com.example.workoutapp.data.model.WorkoutSession
 import com.example.workoutapp.data.model.toJson
 import com.example.workoutapp.data.model.toRichPrescriptionDataOrNull
 import com.example.workoutapp.data.repository.ExerciseRepository
+import com.example.workoutapp.data.repository.SessionExerciseConfig
 import com.example.workoutapp.data.repository.WorkoutSessionRepository
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
@@ -22,6 +26,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -105,5 +110,36 @@ class WorkoutSessionRepositoryInstrumentedTest {
         assertNotNull(sessionExercise.prescriptionJson.toRichPrescriptionDataOrNull())
         assertEquals(richPrescription, sessionExercise.prescriptionJson.toRichPrescriptionDataOrNull())
     }
-}
 
+    @Test
+    fun createSessionWithExercises_rollsBackSessionWhenExerciseInsertFails() = runBlocking {
+        val result = runCatching {
+            workoutSessionRepository.createSessionWithExercises(
+                session = WorkoutSession(name = "Invalid session"),
+                exerciseConfigs = listOf(SessionExerciseConfig(exerciseId = Long.MAX_VALUE))
+            )
+        }
+
+        assertTrue(result.isFailure)
+        assertTrue(workoutSessionRepository.getAllSessions().first().isEmpty())
+    }
+
+    @Test
+    fun createExerciseWithRelations_persistsAllRelations() = runBlocking {
+        val equipmentId = database.equipmentDao().insert(Equipment(name = "Test bands"))
+
+        val exerciseId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Banded row"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = listOf(equipmentId),
+            primaryMuscles = listOf(MuscleGroup.UPPER_BACK),
+            secondaryMuscles = listOf(MuscleGroup.BICEPS)
+        )
+
+        assertNotNull(exerciseRepository.getExerciseById(exerciseId))
+        assertEquals(listOf(WorkoutCategory.STRENGTH), exerciseRepository.getExerciseCategories(exerciseId))
+        assertEquals(listOf(equipmentId), exerciseRepository.getRequiredEquipmentIds(exerciseId))
+        assertEquals(listOf(MuscleGroup.UPPER_BACK), exerciseRepository.getPrimaryMuscles(exerciseId))
+        assertEquals(listOf(MuscleGroup.BICEPS), exerciseRepository.getSecondaryMuscles(exerciseId))
+    }
+}
