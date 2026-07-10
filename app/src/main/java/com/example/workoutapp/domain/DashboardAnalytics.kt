@@ -11,6 +11,9 @@ import kotlin.math.roundToInt
  */
 object DashboardAnalytics {
 
+    const val MIN_BASELINE_TRAINED_CATEGORIES = 3
+    const val MIN_BASELINE_TOTAL_CATEGORY_SESSIONS = 4
+
     data class DashboardRecommendation(
         val title: String,
         val message: String,
@@ -26,6 +29,56 @@ object DashboardAnalytics {
     }
 
     // ── Balance score ────────────────────────────────────────────────────
+    data class BalanceBaselineProgress(
+        val trainedCategories: Int,
+        val requiredCategories: Int = MIN_BASELINE_TRAINED_CATEGORIES,
+        val totalCategorySessions: Int,
+        val requiredTotalSessions: Int = MIN_BASELINE_TOTAL_CATEGORY_SESSIONS
+    ) {
+        val isReady: Boolean
+            get() = trainedCategories >= requiredCategories &&
+                totalCategorySessions >= requiredTotalSessions
+    }
+
+    sealed interface BalanceStatus {
+        val progress: BalanceBaselineProgress
+
+        data class BuildingBaseline(
+            override val progress: BalanceBaselineProgress
+        ) : BalanceStatus
+
+        data class Ready(
+            val score: Int,
+            override val progress: BalanceBaselineProgress
+        ) : BalanceStatus
+    }
+
+    /**
+     * A balance score is considered trustworthy after the user has trained at least
+     * 3 rotation categories and logged at least 4 category sessions. This keeps the
+     * first few workouts from being treated as broad neglect across unobserved categories.
+     */
+    fun balanceStatus(
+        stats: List<CategoryStats>,
+        weights: Map<WorkoutCategory, Float> = emptyMap(),
+        idealDays: Int = 10
+    ): BalanceStatus {
+        val progress = baselineProgress(stats)
+        if (!progress.isReady) return BalanceStatus.BuildingBaseline(progress)
+        return BalanceStatus.Ready(balanceScore(stats, weights, idealDays), progress)
+    }
+
+    fun baselineProgress(stats: List<CategoryStats>): BalanceBaselineProgress {
+        val rotationCategories = WorkoutCategory.rotationCategories().toSet()
+        val trainedStats = stats.filter { stat ->
+            stat.category in rotationCategories && stat.totalSessions > 0
+        }
+        return BalanceBaselineProgress(
+            trainedCategories = trainedStats.map { it.category }.distinct().size,
+            totalCategorySessions = trainedStats.sumOf { it.totalSessions }
+        )
+    }
+
     /**
      * Compute a 0-100 balance score.
      * 100 = all rotation categories have been trained recently
@@ -193,7 +246,7 @@ object DashboardAnalytics {
     // ── Next recommendation ───────────────────────────────────────────────
     fun nextRecommendation(
         pendingPTRoutineCount: Int,
-        balanceScore: Int,
+        balanceStatus: BalanceStatus,
         categoryBalances: List<CategoryBalance>,
         neglectedExercises: List<NeglectedExerciseAlert>
     ): DashboardRecommendation {
@@ -206,6 +259,16 @@ object DashboardAnalytics {
             )
         }
 
+        if (balanceStatus is BalanceStatus.BuildingBaseline) {
+            return DashboardRecommendation(
+                title = "Build your baseline",
+                message = "Log a few workouts so Workout Brain can learn your rotation before judging balance.",
+                actionLabel = "Generate Workout",
+                action = RecommendationAction.GENERATE_WORKOUT
+            )
+        }
+
+        val balanceScore = (balanceStatus as BalanceStatus.Ready).score
         val weakestCategory = categoryBalances
             .filter { it.daysSinceLast < Int.MAX_VALUE }
             .minByOrNull { it.balancePct }

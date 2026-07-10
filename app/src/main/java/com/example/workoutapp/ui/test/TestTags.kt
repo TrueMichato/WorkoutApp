@@ -3,6 +3,7 @@ package com.example.workoutapp.ui.test
 import com.example.workoutapp.data.model.PlanExerciseSection
 import com.example.workoutapp.data.model.TrainingPhase
 import com.example.workoutapp.data.model.WorkoutCategory
+import com.example.workoutapp.ui.exercises.ExerciseLibraryFilter
 
 object TestTags {
     object BottomNav {
@@ -15,12 +16,24 @@ object TestTags {
         fun item(route: String): String = "bottom_nav_$route"
     }
 
+    object Dashboard {
+        const val Screen = "dashboard_screen"
+        const val BalanceBaselineCard = "dashboard_balance_baseline_card"
+        const val BalanceScoreCard = "dashboard_balance_score_card"
+    }
+
     object Exercises {
         const val Screen = "exercises_screen"
         const val SearchField = "exercises_search_field"
         const val AddFab = "exercises_add_fab"
         const val ImportButton = "exercises_import_button"
         const val FilterButton = "exercises_filter_button"
+
+        fun libraryFilter(filter: ExerciseLibraryFilter): String =
+            "exercises_filter_${filter.name.lowercase()}"
+
+        fun exerciseCard(exerciseId: Long): String =
+            "exercises_card_$exerciseId"
     }
 
     object AddEditExercise {

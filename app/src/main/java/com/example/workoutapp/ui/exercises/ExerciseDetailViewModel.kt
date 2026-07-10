@@ -105,16 +105,23 @@ class ExerciseDetailViewModel @Inject constructor(
 
     fun archiveExercise() {
         viewModelScope.launch {
-            exerciseRepository.archiveExercise(currentExerciseId)
-            _uiState.update { it.copy(isDeleted = true) }
+            try {
+                exerciseRepository.archiveExercise(currentExerciseId)
+                _uiState.update { it.copy(archiveCompleted = true, error = null) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message ?: "Failed to archive exercise") }
+            }
         }
     }
 
-    fun deleteExercise() {
+    fun restoreExercise() {
         viewModelScope.launch {
-            val exercise = _uiState.value.exercise ?: return@launch
-            exerciseRepository.deleteExercise(exercise)
-            _uiState.update { it.copy(isDeleted = true) }
+            try {
+                exerciseRepository.unarchiveExercise(currentExerciseId)
+                _uiState.update { it.copy(error = null) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message ?: "Failed to restore exercise") }
+            }
         }
     }
 
@@ -162,6 +169,6 @@ data class ExerciseDetailUiState(
     val programmingPresets: Map<TrainingPhase, ExerciseProgrammingPreset> = emptyMap(),
     val currentPhase: TrainingPhase = TrainingPhase.BALANCED,
     val isLoading: Boolean = true,
-    val isDeleted: Boolean = false,
+    val archiveCompleted: Boolean = false,
     val error: String? = null
 )
