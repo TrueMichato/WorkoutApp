@@ -5,9 +5,7 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 
 /**
  * Reusable workout template that can be played into a fresh workout session.
@@ -87,19 +85,17 @@ data class WorkoutPlanTemplateSummary(
     val updatedAt: Long
 )
 
-private val richPrescriptionJson = Json {
-    ignoreUnknownKeys = true
-    encodeDefaults = true
-}
-
-fun RichPrescriptionData.toJson(): String = richPrescriptionJson.encodeToString(this)
+fun RichPrescriptionData.toJson(): String = persistedJson.encodeToString(this)
 
 fun String.toRichPrescriptionDataOrNull(): RichPrescriptionData? =
-    takeIf { it.isNotBlank() }
-        ?.let {
-            runCatching { richPrescriptionJson.decodeFromString<RichPrescriptionData>(it) }
-                .getOrNull()
-        }
+    decodeRichPrescriptionData().value
+
+fun String.decodeRichPrescriptionData(): PersistedJsonResult<RichPrescriptionData?> =
+    if (isBlank()) {
+        PersistedJsonResult(null)
+    } else {
+        decodePersistedJsonCompatible("rich prescription data", this, null)
+    }
 
 fun RichPrescriptionData.displaySummary(): String = buildList {
     if (rounds > 1) add("$rounds rounds")
@@ -107,4 +103,3 @@ fun RichPrescriptionData.displaySummary(): String = buildList {
     if (tempo.isNotBlank()) add("Tempo $tempo")
     if (effortTarget.isNotBlank()) add(effortTarget)
 }.joinToString(" • ")
-

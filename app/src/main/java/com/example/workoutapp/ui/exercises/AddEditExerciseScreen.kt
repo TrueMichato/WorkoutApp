@@ -47,14 +47,14 @@ fun AddEditExerciseScreen(
 
     // Image picker
     val imagePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents()
+        contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         viewModel.addLocalMedia(uris)
     }
 
     // Video picker
     val videoPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
+        contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let { viewModel.addLocalMedia(listOf(it)) }
     }
@@ -578,10 +578,32 @@ fun AddEditExerciseScreen(
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                "Add photos, videos, or external links",
+                "Add photos, videos, or external links. Local media is copied into WorkoutApp storage on save.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            if (uiState.dataWarnings.isNotEmpty()) {
+                ElevatedCard(
+                    colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            "Saved data needs attention",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                        uiState.dataWarnings.forEach { warning ->
+                            Text(
+                                warning,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
+                }
+            }
 
             // Media preview row
             if (uiState.localMediaUris.isNotEmpty() || uiState.externalUrls.isNotEmpty()) {
@@ -609,7 +631,7 @@ fun AddEditExerciseScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedButton(
-                    onClick = { imagePickerLauncher.launch("image/*") },
+                    onClick = { imagePickerLauncher.launch(arrayOf("image/*")) },
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(Icons.Default.Image, null)
@@ -617,7 +639,7 @@ fun AddEditExerciseScreen(
                     Text("Photo")
                 }
                 OutlinedButton(
-                    onClick = { videoPickerLauncher.launch("video/*") },
+                    onClick = { videoPickerLauncher.launch(arrayOf("video/*")) },
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(Icons.Default.VideoLibrary, null)

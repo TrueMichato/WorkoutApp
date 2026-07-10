@@ -3,10 +3,13 @@ package com.example.workoutapp.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.workoutapp.data.local.ExerciseStorageInfo
+import com.example.workoutapp.data.local.MediaStorageException
 import com.example.workoutapp.data.local.MediaStorageManager
+import com.example.workoutapp.data.model.PersistedDataDecodeException
 import com.example.workoutapp.data.model.TrainingPhase
 import com.example.workoutapp.data.model.UserGoal
 import com.example.workoutapp.data.model.WorkoutCategory
+import com.example.workoutapp.data.model.toUserMessage
 import com.example.workoutapp.data.repository.ExerciseRepository
 import com.example.workoutapp.data.repository.UserGoalRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -40,16 +43,14 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             userGoalRepository.getUserGoalFlow().collect { goal ->
                 val g = goal ?: UserGoal()
-                val weights = try {
-                    userGoalRepository.getCategoryWeights()
-                } catch (_: Exception) {
-                    g.currentPhase.defaultWeights
-                }
+                val weightsResult = userGoalRepository.getCategoryWeightsResult()
+                val weights = weightsResult.value.ifEmpty { g.currentPhase.defaultWeights }
                 _goalState.update {
                     it.copy(
                         currentPhase = g.currentPhase,
                         categoryWeights = weights,
-                        isLoading = false
+                        isLoading = false,
+                        error = weightsResult.issues.toUserMessage().ifBlank { null }
                     )
                 }
             }
@@ -77,23 +78,30 @@ class SettingsViewModel @Inject constructor(
     private fun loadStorageSettings() {
         viewModelScope.launch {
             exerciseRepository.getAllExercises().collect { exercises ->
-                val totalBytes = mediaStorageManager.computeTotalStorageBytes(exercises)
-                val localCount = mediaStorageManager.countLocalMediaFiles(exercises)
-                val urlCount = mediaStorageManager.countExternalUrls(exercises)
-                val breakdown = mediaStorageManager.getStorageBreakdown(exercises)
-                val offloadCandidates = mediaStorageManager.getOffloadCandidates(exercises)
-                val cleanupCandidates = mediaStorageManager.getCleanupCandidates(exercises)
+                try {
+                    val totalBytes = mediaStorageManager.computeTotalStorageBytes(exercises)
+                    val localCount = mediaStorageManager.countLocalMediaFiles(exercises)
+                    val urlCount = mediaStorageManager.countExternalUrls(exercises)
+                    val breakdown = mediaStorageManager.getStorageBreakdown(exercises)
+                    val offloadCandidates = mediaStorageManager.getOffloadCandidates(exercises)
+                    val cleanupCandidates = mediaStorageManager.getCleanupCandidates(exercises)
 
-                _storageState.update {
-                    it.copy(
-                        totalBytes = totalBytes,
-                        localMediaCount = localCount,
-                        externalUrlCount = urlCount,
-                        exerciseBreakdown = breakdown,
-                        offloadCandidates = offloadCandidates,
-                        cleanupCandidates = cleanupCandidates,
-                        isLoading = false
-                    )
+                    _storageState.update {
+                        it.copy(
+                            totalBytes = totalBytes,
+                            localMediaCount = localCount,
+                            externalUrlCount = urlCount,
+                            exerciseBreakdown = breakdown,
+                            offloadCandidates = offloadCandidates,
+                            cleanupCandidates = cleanupCandidates,
+                            isLoading = false,
+                            error = null
+                        )
+                    }
+                } catch (e: PersistedDataDecodeException) {
+                    _storageState.update { it.copy(isLoading = false, error = e.message ?: "Saved media data could not be decoded.") }
+                } catch (e: MediaStorageException) {
+                    _storageState.update { it.copy(isLoading = false, error = e.message ?: "Saved media could not be opened.") }
                 }
             }
         }
@@ -108,7 +116,8 @@ class SettingsViewModel @Inject constructor(
 data class GoalSettingsState(
     val currentPhase: TrainingPhase = TrainingPhase.BALANCED,
     val categoryWeights: Map<WorkoutCategory, Float> = emptyMap(),
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val error: String? = null
 )
 
 data class StorageSettingsState(
@@ -118,9 +127,9 @@ data class StorageSettingsState(
     val exerciseBreakdown: List<ExerciseStorageInfo> = emptyList(),
     val offloadCandidates: List<ExerciseStorageInfo> = emptyList(),
     val cleanupCandidates: List<ExerciseStorageInfo> = emptyList(),
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val error: String? = null
 ) {
     val formattedTotalSize: String
         get() = ExerciseStorageInfo.formatBytes(totalBytes)
 }
-

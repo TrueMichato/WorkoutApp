@@ -94,6 +94,7 @@ import com.example.workoutapp.data.model.TrainingPhase
 import com.example.workoutapp.data.model.WorkoutCategory
 import com.example.workoutapp.data.model.WorkoutPlanTemplateSummary
 import com.example.workoutapp.data.model.WorkoutSession
+import com.example.workoutapp.data.model.decodePersistedEnumNameList
 import com.example.workoutapp.data.model.displaySummary
 import com.example.workoutapp.data.model.toRichPrescriptionDataOrNull
 import com.example.workoutapp.domain.PlannedExerciseSummary
@@ -101,7 +102,6 @@ import com.example.workoutapp.domain.SessionHistorySummary
 import com.example.workoutapp.domain.WorkoutPlanDraft
 import com.example.workoutapp.domain.WorkoutTrackingSummary
 import com.example.workoutapp.ui.test.TestTags
-import kotlinx.serialization.json.Json
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -460,6 +460,22 @@ fun WorkoutGeneratorScreen(
                                     Text("Dismiss")
                                 }
                             }
+                        }
+                    }
+                }
+
+                uiState.warning?.let { warning ->
+                    item {
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = MaterialTheme.shapes.medium,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                warning,
+                                modifier = Modifier.padding(16.dp),
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
                         }
                     }
                 }
@@ -1817,11 +1833,12 @@ private fun buildSetLogLabel(setLog: SetLog): String {
 }
 
 private fun parseTargetCategories(targetCategories: String): String {
-    return runCatching {
-        Json.decodeFromString<List<String>>(targetCategories)
-            .mapNotNull { name -> WorkoutCategory.entries.find { it.name == name }?.displayName }
-            .joinToString(separator = " • ")
-    }.getOrDefault("")
+    val result = decodePersistedEnumNameList<WorkoutCategory>("target categories", targetCategories)
+    return if (result.hasIssues) {
+        "Saved categories need attention"
+    } else {
+        result.value.joinToString(separator = " • ") { it.displayName }
+    }
 }
 
 private fun formatSessionDate(session: WorkoutSession): String {

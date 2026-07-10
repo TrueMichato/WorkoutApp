@@ -3,17 +3,11 @@ package com.example.workoutapp.data.local
 import androidx.room.TypeConverter
 import com.example.workoutapp.data.model.*
 import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 
 /**
  * Room type converters for complex types
  */
 class Converters {
-    private val json = Json {
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-    }
-
     // WorkoutCategory
     @TypeConverter
     fun fromWorkoutCategory(category: WorkoutCategory): String = category.name
@@ -96,59 +90,61 @@ class Converters {
 
     // List<String> for JSON arrays
     @TypeConverter
-    fun fromStringList(list: List<String>): String = json.encodeToString(list)
+    fun fromStringList(list: List<String>): String = persistedJson.encodeToString(list)
 
     @TypeConverter
     fun toStringList(value: String): List<String> =
-        try { json.decodeFromString(value) } catch (e: Exception) { emptyList() }
+        decodePersistedJsonStrict("string list", value)
 
     // List<WorkoutCategory>
     @TypeConverter
     fun fromCategoryList(list: List<WorkoutCategory>): String =
-        json.encodeToString(list.map { it.name })
+        persistedJson.encodeToString(list.map { it.name })
 
     @TypeConverter
-    fun toCategoryList(value: String): List<WorkoutCategory> =
-        try {
-            json.decodeFromString<List<String>>(value).map { WorkoutCategory.valueOf(it) }
-        } catch (e: Exception) {
-            emptyList()
+    fun toCategoryList(value: String): List<WorkoutCategory> {
+        val result = decodePersistedEnumNameList<WorkoutCategory>("workout category list", value)
+        if (result.hasIssues) {
+            throw PersistedDataDecodeException("workout category list", value, IllegalArgumentException(result.issues.toUserMessage()))
         }
+        return result.value
+    }
 
     // List<TimeSlot>
     @TypeConverter
     fun fromTimeSlotList(list: List<TimeSlot>): String =
-        json.encodeToString(list.map { it.name })
+        persistedJson.encodeToString(list.map { it.name })
 
     @TypeConverter
-    fun toTimeSlotList(value: String): List<TimeSlot> =
-        try {
-            json.decodeFromString<List<String>>(value).map { TimeSlot.valueOf(it) }
-        } catch (e: Exception) {
-            emptyList()
+    fun toTimeSlotList(value: String): List<TimeSlot> {
+        val result = decodePersistedEnumNameList<TimeSlot>("time slot list", value)
+        if (result.hasIssues) {
+            throw PersistedDataDecodeException("time slot list", value, IllegalArgumentException(result.issues.toUserMessage()))
         }
+        return result.value
+    }
 
     // List<MediaItem>
     @TypeConverter
-    fun fromMediaItemList(list: List<MediaItem>): String = json.encodeToString(list)
+    fun fromMediaItemList(list: List<MediaItem>): String = persistedJson.encodeToString(list)
 
     @TypeConverter
     fun toMediaItemList(value: String): List<MediaItem> =
-        try { json.decodeFromString(value) } catch (e: Exception) { emptyList() }
+        decodePersistedJsonStrict("media item list", value)
 
     // Map<String, Float> for category weights
     @TypeConverter
-    fun fromFloatMap(map: Map<String, Float>): String = json.encodeToString(map)
+    fun fromFloatMap(map: Map<String, Float>): String = persistedJson.encodeToString(map)
 
     @TypeConverter
     fun toFloatMap(value: String): Map<String, Float> =
-        try { json.decodeFromString(value) } catch (e: Exception) { emptyMap() }
+        decodePersistedJsonStrict("float map", value)
 
     // List<Int> for rest day preferences
     @TypeConverter
-    fun fromIntList(list: List<Int>): String = json.encodeToString(list)
+    fun fromIntList(list: List<Int>): String = persistedJson.encodeToString(list)
 
     @TypeConverter
     fun toIntList(value: String): List<Int> =
-        try { json.decodeFromString(value) } catch (e: Exception) { emptyList() }
+        decodePersistedJsonStrict("integer list", value)
 }

@@ -102,7 +102,7 @@ class WorkoutPlanner @Inject constructor(
         // Record each kept suggestion as an ML feedback event so later completions/skips can refine it.
         val allCategoryStats = userGoalRepository.getAllCategoryStats().first()
         val categoryDaysSince = allCategoryStats.associate { it.category to it.daysSinceLastTrained }
-        val weights = runCatching { userGoalRepository.getCategoryWeights() }.getOrDefault(emptyMap())
+        val weights = userGoalRepository.getCategoryWeights()
         val currentBalanceScore = DashboardAnalytics.balanceScore(allCategoryStats, weights)
 
         draft.exerciseSummaries.forEach { summary ->
