@@ -60,7 +60,7 @@ object WorkoutTrackingSummary {
             session = session,
             exercises = exerciseSummaries,
             totalLoggedSets = exerciseSummaries.sumOf { it.setLogs.size },
-            completedExerciseCount = exerciseSummaries.count { it.sessionExercise.isCompleted },
+            completedExerciseCount = exerciseSummaries.count { it.sessionExercise.isCompleted && !it.sessionExercise.isSkipped },
             skippedExerciseCount = exerciseSummaries.count { it.sessionExercise.isSkipped },
             totalVolume = exerciseSummaries.sumOf { it.totalVolume.toDouble() }.toFloat(),
             totalDurationSeconds = exerciseSummaries.sumOf { it.totalDurationSeconds }
@@ -76,4 +76,3 @@ object WorkoutTrackingSummary {
         }
     }
 }
-
