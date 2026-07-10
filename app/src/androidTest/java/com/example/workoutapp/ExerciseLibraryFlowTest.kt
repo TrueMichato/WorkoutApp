@@ -1,6 +1,8 @@
 package com.example.workoutapp
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -51,7 +53,7 @@ class ExerciseLibraryFlowTest {
     fun addExerciseFlow_savesExerciseAndShowsItInLibrary() {
         val exerciseName = "UI Test Push-up ${System.currentTimeMillis()}"
 
-        composeRule.onNodeWithText("Exercises").performClick()
+        composeRule.onNode(hasText("Exercises") and hasClickAction()).performClick()
         composeRule.onNodeWithTag(TestTags.Exercises.Screen).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.Exercises.AddFab).performClick()
 
@@ -80,7 +82,7 @@ class ExerciseLibraryFlowTest {
             id
         }
 
-        composeRule.onNodeWithText("Exercises").performClick()
+        composeRule.onNode(hasText("Exercises") and hasClickAction()).performClick()
         composeRule.onNodeWithTag(TestTags.Exercises.Screen).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.Exercises.libraryFilter(ExerciseLibraryFilter.ARCHIVED)).performClick()
 
