@@ -18,6 +18,7 @@ object TestTags {
 
     object Dashboard {
         const val Screen = "dashboard_screen"
+        const val ContentList = "dashboard_content"
         const val BalanceBaselineCard = "dashboard_balance_baseline_card"
         const val BalanceScoreCard = "dashboard_balance_score_card"
         const val GenerateWorkoutButton = "dashboard_generate_workout_button"
@@ -78,6 +79,7 @@ object TestTags {
 
     object ActiveWorkout {
         const val Screen = "active_workout_screen"
+        const val ContentList = "active_workout_content"
         const val CurrentExerciseCard = "active_workout_current_exercise_card"
         const val DoneButton = "active_workout_done_button"
         const val SkipButton = "active_workout_skip_button"

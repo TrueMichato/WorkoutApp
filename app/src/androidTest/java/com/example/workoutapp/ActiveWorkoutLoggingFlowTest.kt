@@ -100,7 +100,11 @@ class ActiveWorkoutLoggingFlowTest {
         }
 
         // The single planned exercise becomes the dominant "current exercise" card.
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.CurrentExerciseCard))
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.CurrentExerciseCard).assertIsDisplayed()
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.RepsField))
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.RepsField).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.WeightField).assertIsDisplayed()
         // Rep-based prescriptions have no meaningful duration metric.
@@ -108,16 +112,24 @@ class ActiveWorkoutLoggingFlowTest {
 
         // Negative reps must be rejected with an actionable inline error, not silently dropped.
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.RepsField).performTextReplacement("-5")
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.SaveSetButton))
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.SaveSetButton).performClick()
         composeRule.onNodeWithText("Reps can't be negative").assertIsDisplayed()
 
         // Correcting the input and saving succeeds and shows the logged set.
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.RepsField))
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.RepsField).performTextReplacement("10")
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.WeightField).performTextReplacement("60")
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.SaveSetButton))
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.SaveSetButton).performClick()
         composeRule.onNodeWithText("Logged sets").assertIsDisplayed()
 
         // Done/Skip remain explicit, separate actions from logging a set.
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.ActiveWorkout.DoneButton))
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.DoneButton).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.ActiveWorkout.SkipButton).assertIsDisplayed()
     }

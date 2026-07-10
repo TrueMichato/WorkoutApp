@@ -1,10 +1,12 @@
 package com.example.workoutapp
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.workoutapp.data.local.WorkoutDatabase
@@ -45,6 +47,8 @@ class DashboardFirstRunFlowTest {
         composeRule.onNodeWithTag(TestTags.Dashboard.Screen).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.Dashboard.BalanceBaselineCard).assertIsDisplayed()
         composeRule.onNodeWithText("Learning your baseline").assertIsDisplayed()
+        composeRule.onNodeWithTag(TestTags.Dashboard.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.Dashboard.GenerateWorkoutButton))
         composeRule.onNodeWithTag(TestTags.Dashboard.GenerateWorkoutButton).assertIsDisplayed()
         assertTrue(composeRule.onAllNodesWithText("Very Unbalanced").fetchSemanticsNodes().isEmpty())
         composeRule.onNodeWithContentDescription(
