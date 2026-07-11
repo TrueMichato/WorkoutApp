@@ -91,9 +91,10 @@ class EquipmentManagementFlowTest {
         // bottom bar) and back in, proving the single row persists as one row (not duplicated)
         // on re-entry.
         pressBack()
+        composeRule.waitForIdle()
         composeRule.onNodeWithTag(TestTags.BottomNav.Settings).assertIsDisplayed()
-        composeRule.onNodeWithTag(TestTags.BottomNav.Dashboard).performClick()
-        composeRule.onNodeWithTag(TestTags.BottomNav.Settings).performClick()
+        composeRule.onNodeWithTag(TestTags.BottomNav.Dashboard).assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag(TestTags.BottomNav.Settings).assertIsDisplayed().performClick()
         composeRule.onNodeWithText("Equipment & Locations").performClick()
         composeRule.onNodeWithText("Equipment").performClick()
 
