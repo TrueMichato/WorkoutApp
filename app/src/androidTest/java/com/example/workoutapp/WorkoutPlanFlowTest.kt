@@ -2,6 +2,7 @@ package com.example.workoutapp
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -109,8 +110,20 @@ class WorkoutPlanFlowTest {
         }
 
         assertTrue(composeRule.onAllNodesWithText(exerciseName).fetchSemanticsNodes().isNotEmpty())
+
+        // The rich prescription summary (rounds/tempo/effort) can render below the fold in the
+        // active workout's scrollable content list, so scroll each target into view before
+        // asserting it rather than assuming it's already on screen.
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
+            .performScrollToNode(hasText("3 rounds", substring = true))
         composeRule.onNodeWithText("3 rounds", substring = true).assertIsDisplayed()
+
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
+            .performScrollToNode(hasText("Tempo 31X1", substring = true))
         composeRule.onNodeWithText("Tempo 31X1", substring = true).assertIsDisplayed()
+
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
+            .performScrollToNode(hasText("RPE 8", substring = true))
         composeRule.onNodeWithText("RPE 8", substring = true).assertIsDisplayed()
     }
 }
