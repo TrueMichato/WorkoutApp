@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.workoutapp.data.csv.ExerciseCsvImporter
+import com.example.workoutapp.data.csv.ExerciseCsvTemplateExporter
 import com.example.workoutapp.data.model.Exercise
 import com.example.workoutapp.data.model.WorkoutCategory
 import com.example.workoutapp.data.repository.ExerciseRepository
@@ -16,7 +17,8 @@ import javax.inject.Inject
 @HiltViewModel
 class ExercisesViewModel @Inject constructor(
     private val exerciseRepository: ExerciseRepository,
-    private val exerciseCsvImporter: ExerciseCsvImporter
+    private val exerciseCsvImporter: ExerciseCsvImporter,
+    private val exerciseCsvTemplateExporter: ExerciseCsvTemplateExporter
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -25,6 +27,7 @@ class ExercisesViewModel @Inject constructor(
     private val _isImporting = MutableStateFlow(false)
     private val _importSummary = MutableStateFlow<String?>(null)
     private val _importErrors = MutableStateFlow<List<String>>(emptyList())
+    private val _templateSaveMessage = MutableStateFlow<String?>(null)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private val librarySelectionArgs: Flow<ExerciseLibrarySelectionArgs> = combine(
@@ -40,15 +43,17 @@ class ExercisesViewModel @Inject constructor(
         librarySelectionArgs,
         _isImporting,
         _importSummary,
-        _importErrors
-    ) { selectionArgs, isImporting, importSummary, importErrors ->
+        _importErrors,
+        _templateSaveMessage
+    ) { selectionArgs, isImporting, importSummary, importErrors, templateSaveMessage ->
         ExercisesUiArgs(
             query = selectionArgs.query,
             category = selectionArgs.category,
             libraryFilter = selectionArgs.libraryFilter,
             isImporting = isImporting,
             importSummary = importSummary,
-            importErrors = importErrors
+            importErrors = importErrors,
+            templateSaveMessage = templateSaveMessage
         )
     }.flatMapLatest { args ->
         val exercisesFlow = when {
@@ -81,7 +86,8 @@ class ExercisesViewModel @Inject constructor(
                 isLoading = false,
                 isImporting = args.isImporting,
                 importSummary = args.importSummary,
-                importErrors = args.importErrors
+                importErrors = args.importErrors,
+                templateSaveMessage = args.templateSaveMessage
             )
         }
     }.stateIn(
@@ -130,6 +136,21 @@ class ExercisesViewModel @Inject constructor(
         _importSummary.value = null
         _importErrors.value = emptyList()
     }
+
+    fun saveTemplate(uri: Uri) {
+        viewModelScope.launch {
+            val result = exerciseCsvTemplateExporter.saveTemplate(uri)
+            _templateSaveMessage.value = if (result.isSuccess) {
+                "Saved example CSV template."
+            } else {
+                "Couldn't save the template: ${result.exceptionOrNull()?.message ?: "unknown error"}."
+            }
+        }
+    }
+
+    fun clearTemplateSaveMessage() {
+        _templateSaveMessage.value = null
+    }
 }
 
 private data class ExerciseLibrarySelectionArgs(
@@ -144,7 +165,8 @@ private data class ExercisesUiArgs(
     val libraryFilter: ExerciseLibraryFilter,
     val isImporting: Boolean,
     val importSummary: String?,
-    val importErrors: List<String>
+    val importErrors: List<String>,
+    val templateSaveMessage: String?
 )
 
 enum class ExerciseLibraryFilter(val displayName: String) {
@@ -161,6 +183,7 @@ data class ExercisesUiState(
     val isImporting: Boolean = false,
     val importSummary: String? = null,
     val importErrors: List<String> = emptyList(),
+    val templateSaveMessage: String? = null,
     val error: String? = null
 )
 
