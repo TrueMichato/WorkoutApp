@@ -4,6 +4,7 @@ import com.example.workoutapp.data.local.dao.EquipmentDao
 import com.example.workoutapp.data.model.Equipment
 import com.example.workoutapp.data.model.EquipmentLocation
 import com.example.workoutapp.data.model.LocationEquipmentCrossRef
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
@@ -35,7 +36,12 @@ private class FakeEquipmentDao : EquipmentDao {
         return seeded
     }
 
+    /** Test hooks so create/delete failure paths can be exercised without a real DB. */
+    var insertException: Throwable? = null
+    var deleteException: Throwable? = null
+
     override suspend fun insert(equipment: Equipment): Long {
+        insertException?.let { throw it }
         val id = nextId++
         equipmentFlow.value = equipmentFlow.value + equipment.copy(id = id)
         return id
@@ -49,6 +55,7 @@ private class FakeEquipmentDao : EquipmentDao {
     }
 
     override suspend fun delete(equipment: Equipment) {
+        deleteException?.let { throw it }
         equipmentFlow.value = equipmentFlow.value.filterNot { it.id == equipment.id }
     }
 
@@ -227,6 +234,48 @@ class EquipmentRepositoryTest {
     }
 
     @Test
+    fun createEquipment_internalWhitespaceIsCollapsedOnStorage() = runBlocking {
+        val (repository, _) = newRepository()
+
+        val result = repository.createEquipment("Foam   Roller", "", false)
+
+        assertTrue(result is EquipmentSaveResult.Success)
+        assertEquals("Foam Roller", (result as EquipmentSaveResult.Success).equipment.name)
+    }
+
+    @Test
+    fun createEquipment_duplicateDifferingOnlyByInternalWhitespace_isRejected() = runBlocking {
+        val (repository, dao) = newRepository(Equipment(name = "Foam Roller", isCustom = true))
+
+        val result = repository.createEquipment("Foam   Roller", "", false)
+
+        assertTrue(result is EquipmentSaveResult.Failure)
+        assertTrue((result as EquipmentSaveResult.Failure).error is EquipmentValidationError.DuplicateName)
+        assertEquals(1, dao.equipmentFlow.value.size)
+    }
+
+    @Test
+    fun createEquipment_daoInsertThrows_returnsPersistFailedInsteadOfCrashing() = runBlocking {
+        val (repository, dao) = newRepository()
+        dao.insertException = RuntimeException("simulated DB failure")
+
+        val result = repository.createEquipment("New Thing", "", false)
+
+        assertTrue(result is EquipmentSaveResult.Failure)
+        assertTrue((result as EquipmentSaveResult.Failure).error is EquipmentValidationError.PersistFailed)
+        assertTrue(dao.equipmentFlow.value.isEmpty())
+    }
+
+    @Test(expected = CancellationException::class)
+    fun createEquipment_daoThrowsCancellationException_isRethrownNotSwallowed() = runBlocking {
+        val (repository, dao) = newRepository()
+        dao.insertException = CancellationException("cancelled")
+
+        repository.createEquipment("New Thing", "", false)
+        Unit
+    }
+
+    @Test
     fun deleteEquipment_builtIn_isRefused() = runBlocking {
         val (repository, dao) = newRepository(Equipment(name = "Barbell", isCustom = false))
         val builtIn = dao.equipmentFlow.value.single()
@@ -289,6 +338,29 @@ class EquipmentRepositoryTest {
 
         assertEquals(EquipmentDeletionResult.Success, result)
         assertTrue(dao.equipmentFlow.value.isEmpty())
+    }
+
+    @Test
+    fun deleteEquipment_daoDeleteThrows_returnsUnexpectedErrorInsteadOfCrashing() = runBlocking {
+        val (repository, dao) = newRepository(Equipment(name = "Kettlebell", isCustom = true))
+        val custom = dao.equipmentFlow.value.single()
+        dao.deleteException = RuntimeException("simulated DB failure")
+
+        val result = repository.deleteEquipment(custom)
+
+        assertTrue(result is EquipmentDeletionResult.Failure)
+        assertTrue((result as EquipmentDeletionResult.Failure).error is EquipmentDeletionError.UnexpectedError)
+        assertEquals(1, dao.equipmentFlow.value.size)
+    }
+
+    @Test(expected = CancellationException::class)
+    fun deleteEquipment_daoThrowsCancellationException_isRethrownNotSwallowed() = runBlocking {
+        val (repository, dao) = newRepository(Equipment(name = "Kettlebell", isCustom = true))
+        val custom = dao.equipmentFlow.value.single()
+        dao.deleteException = CancellationException("cancelled")
+
+        repository.deleteEquipment(custom)
+        Unit
     }
 
     @Test

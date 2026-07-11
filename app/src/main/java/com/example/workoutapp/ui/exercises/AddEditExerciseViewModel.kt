@@ -20,6 +20,7 @@ import com.example.workoutapp.data.repository.EquipmentRepository
 import com.example.workoutapp.data.repository.EquipmentSaveResult
 import com.example.workoutapp.data.repository.ExerciseRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -187,19 +188,30 @@ class AddEditExerciseViewModel @Inject constructor(
         if (_uiState.value.isCreatingEquipment) return // debounce double-taps while a save is in flight
         viewModelScope.launch {
             _uiState.update { it.copy(isCreatingEquipment = true, equipmentCreationError = null) }
-            when (val result = equipmentRepository.createEquipment(name, description, isPortable)) {
-                is EquipmentSaveResult.Success -> _uiState.update { state ->
-                    val equipment = result.equipment
-                    val alreadySelected = state.selectedEquipment.any { it.id == equipment.id }
-                    state.copy(
-                        isCreatingEquipment = false,
-                        equipmentCreationError = null,
-                        selectedEquipment = if (alreadySelected) state.selectedEquipment else state.selectedEquipment + equipment,
-                        createdCustomEquipmentId = equipment.id
-                    )
+            try {
+                when (val result = equipmentRepository.createEquipment(name, description, isPortable)) {
+                    is EquipmentSaveResult.Success -> _uiState.update { state ->
+                        val equipment = result.equipment
+                        val alreadySelected = state.selectedEquipment.any { it.id == equipment.id }
+                        state.copy(
+                            isCreatingEquipment = false,
+                            equipmentCreationError = null,
+                            selectedEquipment = if (alreadySelected) state.selectedEquipment else state.selectedEquipment + equipment,
+                            createdCustomEquipmentId = equipment.id
+                        )
+                    }
+                    is EquipmentSaveResult.Failure -> _uiState.update {
+                        it.copy(isCreatingEquipment = false, equipmentCreationError = result.error.message)
+                    }
                 }
-                is EquipmentSaveResult.Failure -> _uiState.update {
-                    it.copy(isCreatingEquipment = false, equipmentCreationError = result.error.message)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // The repository already converts persistence failures into a typed result; this
+                // is a last-resort guard so an unexpected exception never crashes the app or
+                // leaves the dialog stuck mid-save.
+                _uiState.update {
+                    it.copy(isCreatingEquipment = false, equipmentCreationError = "Could not save the equipment. Please try again.")
                 }
             }
         }

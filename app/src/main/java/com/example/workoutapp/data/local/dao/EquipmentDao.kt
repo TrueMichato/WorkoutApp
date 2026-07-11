@@ -4,6 +4,30 @@ import androidx.room.*
 import com.example.workoutapp.data.model.*
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Result of attempting to atomically insert a new custom [Equipment] row after checking for a
+ * name collision, all within a single DB transaction so two concurrent callers (e.g. the CSV
+ * importer and the UI, or two overlapping import rows) can never both pass the duplicate check
+ * and insert duplicate rows.
+ */
+sealed class EquipmentInsertOutcome {
+    data class Inserted(val equipment: Equipment) : EquipmentInsertOutcome()
+    data class DuplicateName(val existingName: String) : EquipmentInsertOutcome()
+    data object PersistFailed : EquipmentInsertOutcome()
+}
+
+/**
+ * Result of attempting to atomically delete a custom [Equipment] row after re-checking it still
+ * exists, is still custom, and is unreferenced - all within a single DB transaction so a
+ * reference can't be created between the check and the delete.
+ */
+sealed class EquipmentDeleteOutcome {
+    data object Deleted : EquipmentDeleteOutcome()
+    data object NotFound : EquipmentDeleteOutcome()
+    data object NotCustom : EquipmentDeleteOutcome()
+    data class InUse(val exerciseCount: Int, val locationCount: Int) : EquipmentDeleteOutcome()
+}
+
 @Dao
 interface EquipmentDao {
 
@@ -46,6 +70,42 @@ interface EquipmentDao {
 
     @Query("SELECT COUNT(*) FROM location_equipment WHERE equipmentId = :equipmentId")
     suspend fun countLocationReferences(equipmentId: Long): Int
+
+    /**
+     * Atomically checks for a case/whitespace-insensitive duplicate name and inserts the row if
+     * none exists, all in one DB transaction, so concurrent creators can't both pass the check
+     * and insert duplicate custom equipment.
+     */
+    @Transaction
+    suspend fun insertIfNameAvailable(equipment: Equipment): EquipmentInsertOutcome {
+        val duplicate = findByNameIgnoreCase(equipment.name)
+        if (duplicate != null) {
+            return EquipmentInsertOutcome.DuplicateName(duplicate.name)
+        }
+        val id = insert(equipment)
+        val created = getById(id) ?: return EquipmentInsertOutcome.PersistFailed
+        return EquipmentInsertOutcome.Inserted(created)
+    }
+
+    /**
+     * Atomically re-checks that [equipmentId] still exists, is still custom, and is still
+     * unreferenced before deleting it, all in one DB transaction, so a reference can't be added
+     * between the check and the delete.
+     */
+    @Transaction
+    suspend fun deleteCustomEquipmentIfUnreferenced(equipmentId: Long): EquipmentDeleteOutcome {
+        val current = getById(equipmentId) ?: return EquipmentDeleteOutcome.NotFound
+        if (!current.isCustom) {
+            return EquipmentDeleteOutcome.NotCustom
+        }
+        val exerciseRefs = countExerciseReferences(current.id)
+        val locationRefs = countLocationReferences(current.id)
+        if (exerciseRefs > 0 || locationRefs > 0) {
+            return EquipmentDeleteOutcome.InUse(exerciseRefs, locationRefs)
+        }
+        delete(current)
+        return EquipmentDeleteOutcome.Deleted
+    }
 
     // Location CRUD
     @Insert(onConflict = OnConflictStrategy.REPLACE)

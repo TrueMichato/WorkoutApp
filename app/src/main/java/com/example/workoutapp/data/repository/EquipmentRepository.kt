@@ -1,7 +1,10 @@
 package com.example.workoutapp.data.repository
 
 import com.example.workoutapp.data.local.dao.EquipmentDao
+import com.example.workoutapp.data.local.dao.EquipmentDeleteOutcome
+import com.example.workoutapp.data.local.dao.EquipmentInsertOutcome
 import com.example.workoutapp.data.model.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -27,64 +30,89 @@ class EquipmentRepository @Inject constructor(
     suspend fun getEquipmentById(id: Long): Equipment? = equipmentDao.getById(id)
 
     suspend fun getEquipmentByNameIgnoreCase(name: String): Equipment? =
-        equipmentDao.findByNameIgnoreCase(name)
+        equipmentDao.findByNameIgnoreCase(normalizeName(name))
+
+    /**
+     * Collapses leading/trailing AND repeated internal whitespace to a single space, so
+     * "  Foam   Roller " and "Foam Roller" are treated (and stored) identically - true
+     * whitespace-insensitive matching, not just an edge trim.
+     */
+    private fun normalizeName(raw: String): String = raw.trim().replace(Regex("\\s+"), " ")
 
     /**
      * Validates and creates a custom equipment row. Rejects blank/too-long names and
      * case/whitespace-insensitive duplicates of any existing equipment (built-in or custom) so
-     * users can't shadow a built-in item or create duplicate custom rows.
+     * users can't shadow a built-in item or create duplicate custom rows. The duplicate check and
+     * insert happen atomically in a single DB transaction ([EquipmentDao.insertIfNameAvailable])
+     * so two concurrent callers can never both pass the check and insert duplicates. Any
+     * unexpected persistence exception is caught and surfaced as a typed failure rather than
+     * escaping as an unhandled coroutine exception; [CancellationException] is always rethrown so
+     * cancellation semantics are preserved.
      */
     suspend fun createEquipment(
         name: String,
         description: String = "",
         isPortable: Boolean = false
     ): EquipmentSaveResult {
-        val trimmedName = name.trim()
-        if (trimmedName.isBlank()) {
+        val normalizedName = normalizeName(name)
+        if (normalizedName.isBlank()) {
             return EquipmentSaveResult.Failure(EquipmentValidationError.BlankName)
         }
-        if (trimmedName.length > MAX_NAME_LENGTH) {
+        if (normalizedName.length > MAX_NAME_LENGTH) {
             return EquipmentSaveResult.Failure(EquipmentValidationError.NameTooLong(MAX_NAME_LENGTH))
         }
-        val duplicate = equipmentDao.findByNameIgnoreCase(trimmedName)
-        if (duplicate != null) {
-            return EquipmentSaveResult.Failure(EquipmentValidationError.DuplicateName(duplicate.name))
+        val normalizedDescription = description.trim().take(MAX_DESCRIPTION_LENGTH)
+        return try {
+            when (
+                val outcome = equipmentDao.insertIfNameAvailable(
+                    Equipment(
+                        name = normalizedName,
+                        description = normalizedDescription,
+                        isPortable = isPortable,
+                        isCustom = true
+                    )
+                )
+            ) {
+                is EquipmentInsertOutcome.Inserted -> EquipmentSaveResult.Success(outcome.equipment)
+                is EquipmentInsertOutcome.DuplicateName ->
+                    EquipmentSaveResult.Failure(EquipmentValidationError.DuplicateName(outcome.existingName))
+                is EquipmentInsertOutcome.PersistFailed ->
+                    EquipmentSaveResult.Failure(EquipmentValidationError.PersistFailed)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            EquipmentSaveResult.Failure(EquipmentValidationError.PersistFailed)
         }
-        val trimmedDescription = description.trim().take(MAX_DESCRIPTION_LENGTH)
-        val id = equipmentDao.insert(
-            Equipment(
-                name = trimmedName,
-                description = trimmedDescription,
-                isPortable = isPortable,
-                isCustom = true
-            )
-        )
-        val created = equipmentDao.getById(id)
-            ?: return EquipmentSaveResult.Failure(EquipmentValidationError.PersistFailed)
-        return EquipmentSaveResult.Success(created)
     }
 
     suspend fun updateEquipment(equipment: Equipment) = equipmentDao.update(equipment)
 
     /**
-     * Deletes custom equipment only after confirming it still exists and is not referenced by any
-     * exercise or location, so removal never silently strips equipment out of a user's saved data.
+     * Deletes custom equipment only after atomically re-confirming (in a single DB transaction,
+     * [EquipmentDao.deleteCustomEquipmentIfUnreferenced]) that it still exists, is still custom,
+     * and is not referenced by any exercise or location, so removal never silently strips
+     * equipment out of a user's saved data and a reference can't sneak in between the check and
+     * the delete. Any unexpected persistence exception is caught and surfaced as a typed failure;
+     * [CancellationException] is always rethrown.
      */
     suspend fun deleteEquipment(equipment: Equipment): EquipmentDeletionResult {
-        if (!equipment.isCustom) {
-            return EquipmentDeletionResult.Failure(EquipmentDeletionError.NotCustom)
+        return try {
+            when (val outcome = equipmentDao.deleteCustomEquipmentIfUnreferenced(equipment.id)) {
+                EquipmentDeleteOutcome.Deleted -> EquipmentDeletionResult.Success
+                EquipmentDeleteOutcome.NotFound ->
+                    EquipmentDeletionResult.Failure(EquipmentDeletionError.NotFound)
+                EquipmentDeleteOutcome.NotCustom ->
+                    EquipmentDeletionResult.Failure(EquipmentDeletionError.NotCustom)
+                is EquipmentDeleteOutcome.InUse -> EquipmentDeletionResult.Failure(
+                    EquipmentDeletionError.InUse(outcome.exerciseCount, outcome.locationCount)
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            EquipmentDeletionResult.Failure(EquipmentDeletionError.UnexpectedError)
         }
-        val current = equipmentDao.getById(equipment.id)
-            ?: return EquipmentDeletionResult.Failure(EquipmentDeletionError.NotFound)
-        val exerciseRefs = equipmentDao.countExerciseReferences(current.id)
-        val locationRefs = equipmentDao.countLocationReferences(current.id)
-        if (exerciseRefs > 0 || locationRefs > 0) {
-            return EquipmentDeletionResult.Failure(
-                EquipmentDeletionError.InUse(exerciseRefs, locationRefs)
-            )
-        }
-        equipmentDao.delete(current)
-        return EquipmentDeletionResult.Success
     }
 
     // Locations

@@ -1,6 +1,7 @@
 package com.example.workoutapp.ui.equipment
 
 import com.example.workoutapp.data.model.Equipment
+import com.example.workoutapp.data.model.EquipmentLocation
 import com.example.workoutapp.data.repository.EquipmentDeletionError
 import com.example.workoutapp.data.repository.EquipmentDeletionResult
 import com.example.workoutapp.data.repository.EquipmentRepository
@@ -144,6 +145,19 @@ class EquipmentViewModelTest {
     }
 
     @Test
+    fun createEquipment_repositoryThrows_resetsIsSavingAndSetsVisibleErrorInsteadOfCrashing() = runTest(testDispatcher) {
+        val viewModel = createViewModel()
+        coEvery { equipmentRepository.createEquipment(any(), any(), any()) } throws RuntimeException("simulated failure")
+
+        viewModel.createEquipment("Slam Ball", "", false)
+
+        val state = viewModel.addEquipmentState.value
+        assertFalse(state.isSaving)
+        assertNull(state.createdEquipmentId)
+        assertTrue(state.error != null)
+    }
+
+    @Test
     fun consumeCreatedEquipmentSignal_clearsOneShotId() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         coEvery { equipmentRepository.createEquipment(any(), any(), any()) } returns
@@ -194,5 +208,128 @@ class EquipmentViewModelTest {
         viewModel.clearEquipmentActionError()
 
         assertNull(viewModel.uiState.value.equipmentActionError)
+    }
+
+    @Test
+    fun deleteCustomEquipment_repositoryThrows_setsVisibleActionErrorInsteadOfCrashing() = runTest(testDispatcher) {
+        val viewModel = createViewModel()
+        val equipment = Equipment(id = 8, name = "Kettlebell", isCustom = true)
+        coEvery { equipmentRepository.deleteEquipment(equipment) } throws RuntimeException("simulated failure")
+
+        viewModel.deleteCustomEquipment(equipment)
+
+        assertTrue(viewModel.uiState.value.equipmentActionError != null)
+    }
+
+    // ===================== Create location (hardened, mirrors add-equipment) =====================
+
+    @Test
+    fun createLocation_success_setsCreatedIdAndClearsSavingAndError() = runTest(testDispatcher) {
+        val viewModel = createViewModel()
+        coEvery { equipmentRepository.createLocation(any(), any()) } returns 42L
+
+        viewModel.createLocation("Home Gym", "My garage", setDefault = false)
+
+        val state = viewModel.createLocationState.value
+        assertFalse(state.isSaving)
+        assertNull(state.error)
+        assertEquals(42L, state.createdLocationId)
+    }
+
+    @Test
+    fun createLocation_blankName_isRejectedWithoutCallingRepository() = runTest(testDispatcher) {
+        val viewModel = createViewModel()
+
+        viewModel.createLocation("   ", "", setDefault = false)
+
+        val state = viewModel.createLocationState.value
+        assertTrue(state.error != null)
+        assertNull(state.createdLocationId)
+        coVerify(exactly = 0) { equipmentRepository.createLocation(any(), any()) }
+    }
+
+    @Test
+    fun createLocation_repositoryThrows_setsVisibleErrorInsteadOfSilentlyClosing() = runTest(testDispatcher) {
+        val viewModel = createViewModel()
+        coEvery { equipmentRepository.createLocation(any(), any()) } throws RuntimeException("simulated DB failure")
+
+        viewModel.createLocation("Home Gym", "", setDefault = false)
+
+        val state = viewModel.createLocationState.value
+        assertFalse(state.isSaving)
+        assertNull(state.createdLocationId)
+        assertTrue(state.error != null)
+    }
+
+    @Test
+    fun createLocation_whileSaveInFlight_debouncesSecondCall() = runTest(testDispatcher) {
+        val viewModel = createViewModel()
+        val gate = Channel<Unit>()
+        coEvery { equipmentRepository.createLocation(any(), any()) } coAnswers {
+            gate.receive()
+            99L
+        }
+
+        viewModel.createLocation("Home Gym", "", setDefault = false) // suspends on the gate
+        assertTrue(viewModel.createLocationState.value.isSaving)
+
+        viewModel.createLocation("Home Gym", "", setDefault = false) // must be ignored while saving
+
+        gate.send(Unit)
+        coVerify(exactly = 1) { equipmentRepository.createLocation(any(), any()) }
+    }
+
+    @Test
+    fun consumeCreatedLocationSignal_clearsOneShotId() = runTest(testDispatcher) {
+        val viewModel = createViewModel()
+        coEvery { equipmentRepository.createLocation(any(), any()) } returns 5L
+        viewModel.createLocation("Home Gym", "", setDefault = false)
+        assertEquals(5L, viewModel.createLocationState.value.createdLocationId)
+
+        viewModel.consumeCreatedLocationSignal()
+
+        assertNull(viewModel.createLocationState.value.createdLocationId)
+    }
+
+    // ===================== loadLocation resilience =====================
+
+    @Test
+    fun loadLocation_missingRecord_clearsLoadingAndSetsVisibleErrorInsteadOfStayingStuckLoading() = runTest(testDispatcher) {
+        val viewModel = createViewModel()
+        coEvery { equipmentRepository.getLocationById(123L) } returns null
+
+        viewModel.loadLocation(123L)
+
+        val state = viewModel.locationDetailState.value
+        assertFalse(state.isLoading)
+        assertTrue(state.saveError != null)
+    }
+
+    @Test
+    fun loadLocation_repositoryThrows_clearsLoadingAndSetsVisibleErrorInsteadOfStayingStuckLoading() = runTest(testDispatcher) {
+        val viewModel = createViewModel()
+        coEvery { equipmentRepository.getLocationById(123L) } throws RuntimeException("simulated DB failure")
+
+        viewModel.loadLocation(123L)
+
+        val state = viewModel.locationDetailState.value
+        assertFalse(state.isLoading)
+        assertTrue(state.saveError != null)
+    }
+
+    @Test
+    fun loadLocation_success_populatesStateAndClearsLoading() = runTest(testDispatcher) {
+        val viewModel = createViewModel()
+        val location = EquipmentLocation(id = 9, name = "Home Gym", description = "desc", isDefault = true)
+        coEvery { equipmentRepository.getLocationById(9L) } returns location
+        coEvery { equipmentRepository.getEquipmentIdsForLocation(9L) } returns listOf(1L, 2L)
+
+        viewModel.loadLocation(9L)
+
+        val state = viewModel.locationDetailState.value
+        assertFalse(state.isLoading)
+        assertNull(state.saveError)
+        assertEquals("Home Gym", state.name)
+        assertEquals(setOf(1L, 2L), state.selectedEquipmentIds)
     }
 }

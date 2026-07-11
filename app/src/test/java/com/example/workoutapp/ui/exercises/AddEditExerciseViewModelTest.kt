@@ -89,6 +89,20 @@ class AddEditExerciseViewModelTest {
     }
 
     @Test
+    fun createCustomEquipment_repositoryThrows_resetsCreatingFlagAndSetsVisibleErrorInsteadOfCrashing() = runTest(testDispatcher) {
+        val viewModel = createViewModel()
+        coEvery { equipmentRepository.createEquipment(any(), any(), any()) } throws RuntimeException("simulated DB failure")
+
+        viewModel.createCustomEquipment("Sandbag", "", false)
+
+        val state = viewModel.uiState.value
+        assertFalse(state.isCreatingEquipment)
+        assertNull(state.createdCustomEquipmentId)
+        assertTrue(state.selectedEquipment.isEmpty())
+        assertTrue(state.equipmentCreationError != null)
+    }
+
+    @Test
     fun createCustomEquipment_blankName_setsBlankNameError() = runTest(testDispatcher) {
         val viewModel = createViewModel()
         coEvery { equipmentRepository.createEquipment(any(), any(), any()) } returns

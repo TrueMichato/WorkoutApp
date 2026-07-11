@@ -54,4 +54,8 @@ sealed class EquipmentDeletionError(val message: String) {
             append(". Remove it from those first.")
         }
     )
+
+    /** An unexpected persistence error (e.g. a DB exception) rather than a validation outcome. */
+    data object UnexpectedError :
+        EquipmentDeletionError("Something went wrong while removing this equipment. Please try again.")
 }

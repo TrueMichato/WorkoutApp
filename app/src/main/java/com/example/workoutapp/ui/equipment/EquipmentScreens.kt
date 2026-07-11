@@ -68,6 +68,7 @@ fun EquipmentManagementScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val addEquipmentState by viewModel.addEquipmentState.collectAsStateWithLifecycle()
+    val createLocationState by viewModel.createLocationState.collectAsStateWithLifecycle()
     var selectedTab by remember { mutableIntStateOf(0) }
     var showAddLocationDialog by remember { mutableStateOf(false) }
     var showAddEquipmentDialog by remember { mutableStateOf(false) }
@@ -79,6 +80,15 @@ fun EquipmentManagementScreen(
             showAddEquipmentDialog = false
             viewModel.consumeCreatedEquipmentSignal()
             viewModel.resetAddEquipmentState()
+        }
+    }
+
+    // Same confirmed-persistence-only close behavior for locations.
+    LaunchedEffect(createLocationState.createdLocationId) {
+        if (createLocationState.createdLocationId != null) {
+            showAddLocationDialog = false
+            viewModel.consumeCreatedLocationSignal()
+            viewModel.resetCreateLocationState()
         }
     }
 
@@ -133,11 +143,15 @@ fun EquipmentManagementScreen(
 
     if (showAddLocationDialog) {
         CreateLocationDialog(
+            isSaving = createLocationState.isSaving,
+            errorMessage = createLocationState.error,
             onConfirm = { name, description, setDefault ->
                 viewModel.createLocation(name, description, setDefault)
-                showAddLocationDialog = false
             },
-            onDismiss = { showAddLocationDialog = false }
+            onDismiss = {
+                showAddLocationDialog = false
+                viewModel.resetCreateLocationState()
+            }
         )
     }
 
@@ -506,6 +520,8 @@ fun LocationDetailScreen(
 
 @Composable
 private fun CreateLocationDialog(
+    isSaving: Boolean,
+    errorMessage: String?,
     onConfirm: (String, String, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -523,7 +539,9 @@ private fun CreateLocationDialog(
                     onValueChange = { name = it },
                     label = { Text("Name") },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    singleLine = true,
+                    enabled = !isSaving,
+                    isError = errorMessage != null
                 )
                 OutlinedTextField(
                     value = description,
@@ -531,21 +549,33 @@ private fun CreateLocationDialog(
                     label = { Text("Description") },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
-                    maxLines = 3
+                    maxLines = 3,
+                    enabled = !isSaving
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = setDefault, onCheckedChange = { setDefault = it })
+                    Checkbox(checked = setDefault, onCheckedChange = { setDefault = it }, enabled = !isSaving)
                     Text("Use as default")
+                }
+                if (errorMessage != null) {
+                    Text(
+                        errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(name, description, setDefault) }, enabled = name.isNotBlank()) {
-                Text("Create")
+            TextButton(onClick = { onConfirm(name, description, setDefault) }, enabled = name.isNotBlank() && !isSaving) {
+                if (isSaving) {
+                    CircularProgressIndicator(modifier = Modifier.width(16.dp).height(16.dp), strokeWidth = 2.dp)
+                } else {
+                    Text("Create")
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss, enabled = !isSaving) { Text("Cancel") }
         }
     )
 }
