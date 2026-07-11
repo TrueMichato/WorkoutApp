@@ -10,6 +10,7 @@ import com.example.workoutapp.data.model.TrainingPhase
 import com.example.workoutapp.data.model.WorkoutCategory
 import com.example.workoutapp.data.model.decodeStoredProgrammingPresets
 import com.example.workoutapp.data.repository.EquipmentRepository
+import com.example.workoutapp.data.repository.EquipmentSaveResult
 import com.example.workoutapp.data.repository.ExerciseRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -51,7 +52,8 @@ class ExerciseCsvImporterTest {
         coEvery { exerciseRepository.createExerciseWithRelations(any(), any(), any(), any(), any()) } answers {
             nextExerciseId++
         }
-        coEvery { equipmentRepository.createEquipment(any(), any(), any()) } returns 100L
+        coEvery { equipmentRepository.createEquipment(any(), any(), any()) } returns
+            EquipmentSaveResult.Success(Equipment(id = 100L, name = "Kettlebell"))
         coEvery { equipmentRepository.getEquipmentById(100L) } returns Equipment(id = 100L, name = "Kettlebell")
 
         importer = ExerciseCsvImporter(context, exerciseRepository, equipmentRepository)
