@@ -578,7 +578,7 @@ fun AddEditExerciseScreen(
             HorizontalDivider()
 
             // Exercise Family Section
-            val selectedParent = uiState.familyParentCandidates.firstOrNull { it.id == uiState.selectedParentId }
+            val selectedParentName = uiState.selectedParentName
             Text(
                 "Exercise Family",
                 style = MaterialTheme.typography.titleSmall,
@@ -593,9 +593,9 @@ fun AddEditExerciseScreen(
                 uiState.existingVariations.forEach { variation ->
                     AssistChip(onClick = {}, label = { Text(variation.name) })
                 }
-            } else if (selectedParent != null) {
+            } else if (uiState.selectedParentId != null && selectedParentName != null) {
                 Text(
-                    "Variation of \"${selectedParent.name}\"",
+                    "Variation of \"$selectedParentName\"",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -786,8 +786,8 @@ fun AddEditExerciseScreen(
             FamilyParentSelectionDialog(
                 candidates = uiState.familyParentCandidates,
                 selectedParentId = uiState.selectedParentId,
-                onSelect = { parentId ->
-                    viewModel.onFamilyParentSelected(parentId)
+                onSelect = { parent ->
+                    viewModel.onFamilyParentSelected(parent)
                     showFamilyParentDialog = false
                 },
                 onDismiss = { showFamilyParentDialog = false }
@@ -1011,7 +1011,7 @@ private fun EquipmentSelectionDialog(
 private fun FamilyParentSelectionDialog(
     candidates: List<Exercise>,
     selectedParentId: Long?,
-    onSelect: (Long?) -> Unit,
+    onSelect: (Exercise?) -> Unit,
     onDismiss: () -> Unit
 ) {
     var query by remember { mutableStateOf("") }
@@ -1043,14 +1043,14 @@ private fun FamilyParentSelectionDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onSelect(candidate.id) }
+                            .clickable { onSelect(candidate) }
                             .testTag(TestTags.AddEditExercise.familyParentOption(candidate.id))
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(
                             selected = candidate.id == selectedParentId,
-                            onClick = { onSelect(candidate.id) }
+                            onClick = { onSelect(candidate) }
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(candidate.name)

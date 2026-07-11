@@ -445,7 +445,7 @@ class ExerciseProtectionInstrumentedTest {
         viewModel.addLocalMedia(listOf(newSourceFile.toUri()))
         viewModel.updateName("Renamed During Failed Save")
         viewModel.updateDescription("this description should never persist")
-        viewModel.onFamilyParentSelected(invalidParentId)
+        viewModel.onFamilyParentSelected(exerciseRepository.getExerciseById(invalidParentId))
         viewModel.onFamilyFocusChanged("attempted focus")
 
         viewModel.saveExercise()

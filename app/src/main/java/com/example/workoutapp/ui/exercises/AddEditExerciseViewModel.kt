@@ -27,6 +27,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
@@ -62,18 +63,22 @@ class AddEditExerciseViewModel @Inject constructor(
      * not itself, and not already a variation of something else (a variation can't also be a
      * main exercise - see ExerciseRepository.linkVariation). Exercises that already have their
      * own variations remain valid candidates, since one main exercise can have many variations.
+     *
+     * A one-shot fetch rather than a live Flow collection: this list only backs a modal picker
+     * dialog the user opens on demand, so there's no need to keep it reactively up to date while
+     * the rest of the form is being edited, and a plain suspend fetch settles deterministically
+     * instead of depending on an indefinitely-running collector.
      */
     private fun loadFamilyPickerCandidates() {
         viewModelScope.launch {
-            exerciseRepository.getAllExercises().collect { exercises ->
-                val variationIds = exerciseRepository.getFamilyRootIdsForAll().keys
-                _uiState.update { state ->
-                    state.copy(
-                        familyParentCandidates = exercises.filter { candidate ->
-                            candidate.id != editingExerciseId && candidate.id !in variationIds
-                        }
-                    )
-                }
+            val exercises = exerciseRepository.getAllExercises().firstOrNull().orEmpty()
+            val variationIds = exerciseRepository.getFamilyRootIdsForAll().keys
+            _uiState.update { state ->
+                state.copy(
+                    familyParentCandidates = exercises.filter { candidate ->
+                        candidate.id != editingExerciseId && candidate.id !in variationIds
+                    }
+                )
             }
         }
     }
@@ -97,6 +102,7 @@ class AddEditExerciseViewModel @Inject constructor(
 
             val existingFamily = exerciseRepository.getFamily(exerciseId)
             val originalParentId = exerciseRepository.getParentExerciseId(exerciseId)
+            val originalParentName = if (originalParentId != null) existingFamily?.root?.name else null
             val originalFocus = existingFamily?.variations
                 ?.firstOrNull { it.exercise.id == exerciseId }?.focus.orEmpty()
             // Only exercises that are the family's main/root exercise (not the one being edited)
@@ -163,6 +169,7 @@ class AddEditExerciseViewModel @Inject constructor(
                     dataWarnings = decodeIssues.map { it.message },
                     originalParentId = originalParentId,
                     selectedParentId = originalParentId,
+                    selectedParentName = originalParentName,
                     familyFocus = originalFocus,
                     existingVariations = existingVariations,
                     familyError = null,
@@ -210,6 +217,7 @@ class AddEditExerciseViewModel @Inject constructor(
                     isUnilateral = parent.isUnilateral,
                     originalParentId = null,
                     selectedParentId = parentExerciseId,
+                    selectedParentName = parent.name,
                     familyFocus = "",
                     existingVariations = emptyList(),
                     familyError = null,
@@ -481,19 +489,21 @@ class AddEditExerciseViewModel @Inject constructor(
     }
 
     /**
-     * Selects (or clears, when [parentId] is null) which main exercise this exercise is a
+     * Selects (or clears, when [parent] is null) which main exercise this exercise is a
      * variation of. Blocked when this exercise already has its own variations (a main exercise
      * can't also become a variation - no multi-level nesting), surfaced via [familyError] the
-     * same way [nameError] surfaces a blank-name problem.
+     * same way [nameError] surfaces a blank-name problem. Takes the full [Exercise] (rather than
+     * just an id) so the display name is set atomically with the selection - never dependent on
+     * a separately-loaded candidates list that might not have emitted yet.
      */
-    fun onFamilyParentSelected(parentId: Long?) {
+    fun onFamilyParentSelected(parent: Exercise?) {
         _uiState.update { state ->
-            if (parentId != null && state.existingVariations.isNotEmpty()) {
+            if (parent != null && state.existingVariations.isNotEmpty()) {
                 state.copy(
                     familyError = "This exercise already has its own variations, so it can't also be a variation of another exercise."
                 )
             } else {
-                state.copy(selectedParentId = parentId, familyError = null)
+                state.copy(selectedParentId = parent?.id, selectedParentName = parent?.name, familyError = null)
             }
         }
     }
@@ -504,7 +514,9 @@ class AddEditExerciseViewModel @Inject constructor(
 
     /** Detaches this exercise from its main exercise, leaving it standalone. Save-time only. */
     fun detachFromFamily() {
-        _uiState.update { it.copy(selectedParentId = null, familyFocus = "", familyError = null) }
+        _uiState.update {
+            it.copy(selectedParentId = null, selectedParentName = null, familyFocus = "", familyError = null)
+        }
     }
 
     fun saveExercise() {
@@ -769,6 +781,10 @@ data class AddEditExerciseUiState(
     val familyParentCandidates: List<Exercise> = emptyList(),
     val originalParentId: Long? = null,
     val selectedParentId: Long? = null,
+    // Set atomically alongside selectedParentId (loadExercise/loadNewVariation/onFamilyParentSelected)
+    // so the "Variation of X" display never depends on familyParentCandidates having already
+    // emitted from its own separate, async Flow collection.
+    val selectedParentName: String? = null,
     val familyFocus: String = "",
     val existingVariations: List<Exercise> = emptyList(),
     val familyError: String? = null
