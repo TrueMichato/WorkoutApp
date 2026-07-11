@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.test.espresso.Espresso.pressBack
 import com.example.workoutapp.data.local.WorkoutDatabase
 import com.example.workoutapp.ui.test.TestTags
 import dagger.hilt.android.testing.HiltAndroidRule
@@ -74,8 +75,23 @@ class EquipmentManagementFlowTest {
         }
         composeRule.onNodeWithText(equipmentName).assertIsDisplayed()
 
-        // The app must remain fully usable: navigating away and back should not crash and the
-        // single row should persist as one row (not duplicated) on re-entry.
+        // The app must remain fully usable. First prove the current screen still responds to
+        // input by switching tabs in place - this alone would have failed had the earlier crash
+        // still been present, since the whole Compose hierarchy would have torn down. Note the
+        // bottom navigation bar is intentionally NOT rendered while nested inside Equipment
+        // Management (see WorkoutAppMain.showBottomBar, which only shows it for top-level
+        // bottomNavItems destinations), so asserting/clicking a bottom_nav_* tag from this screen
+        // is not a valid usability probe here.
+        composeRule.onNodeWithText("Locations").performClick()
+        composeRule.onNodeWithTag(TestTags.Equipment.Screen).assertIsDisplayed()
+        composeRule.onNodeWithText("Equipment").performClick()
+        composeRule.onNodeWithText(equipmentName).assertIsDisplayed()
+
+        // Now navigate away entirely (system back leaves Equipment Management, restoring the
+        // bottom bar) and back in, proving the single row persists as one row (not duplicated)
+        // on re-entry.
+        pressBack()
+        composeRule.onNodeWithTag(TestTags.BottomNav.Settings).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.BottomNav.Dashboard).performClick()
         composeRule.onNodeWithTag(TestTags.BottomNav.Settings).performClick()
         composeRule.onNodeWithText("Equipment & Locations").performClick()
