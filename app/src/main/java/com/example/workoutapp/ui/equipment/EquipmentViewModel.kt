@@ -4,7 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.workoutapp.data.model.Equipment
 import com.example.workoutapp.data.model.EquipmentLocation
+import com.example.workoutapp.data.repository.EquipmentDeletionResult
 import com.example.workoutapp.data.repository.EquipmentRepository
+import com.example.workoutapp.data.repository.EquipmentSaveResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +26,9 @@ class EquipmentViewModel @Inject constructor(
     private val _locationDetailState = MutableStateFlow(LocationDetailUiState())
     val locationDetailState: StateFlow<LocationDetailUiState> = _locationDetailState.asStateFlow()
 
+    private val _addEquipmentState = MutableStateFlow(AddEquipmentUiState())
+    val addEquipmentState: StateFlow<AddEquipmentUiState> = _addEquipmentState.asStateFlow()
+
     init {
         observeEquipment()
         observeLocations()
@@ -35,6 +40,7 @@ class EquipmentViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         allEquipment = equipment,
+                        builtInEquipment = equipment.filter { item -> !item.isCustom },
                         customEquipment = equipment.filter { item -> item.isCustom },
                         isLoading = false
                     )
@@ -61,23 +67,51 @@ class EquipmentViewModel @Inject constructor(
     fun createLocation(name: String, description: String, setDefault: Boolean) {
         if (name.isBlank()) return
         viewModelScope.launch {
-            val locationId = equipmentRepository.createLocation(name.trim(), description.trim())
-            if (setDefault) equipmentRepository.setDefaultLocation(locationId)
+            try {
+                val locationId = equipmentRepository.createLocation(name.trim(), description.trim())
+                if (setDefault) equipmentRepository.setDefaultLocation(locationId)
+            } catch (e: Exception) {
+                // Locations list observes the DB via Flow; nothing to persist here on failure, but
+                // catching prevents an unhandled coroutine exception from crashing the app.
+            }
         }
     }
 
     fun createEquipment(name: String, description: String, isPortable: Boolean) {
-        if (name.isBlank()) return
+        if (_addEquipmentState.value.isSaving) return // debounce double-taps while a save is in flight
         viewModelScope.launch {
-            equipmentRepository.createEquipment(name.trim(), description.trim(), isPortable)
+            _addEquipmentState.update { it.copy(isSaving = true, error = null) }
+            when (val result = equipmentRepository.createEquipment(name, description, isPortable)) {
+                is EquipmentSaveResult.Success -> _addEquipmentState.update {
+                    it.copy(isSaving = false, error = null, createdEquipmentId = result.equipment.id)
+                }
+                is EquipmentSaveResult.Failure -> _addEquipmentState.update {
+                    it.copy(isSaving = false, error = result.error.message)
+                }
+            }
         }
     }
 
+    /** Clears the one-shot "just created" signal after the caller has reacted to it. */
+    fun consumeCreatedEquipmentSignal() {
+        _addEquipmentState.update { it.copy(createdEquipmentId = null) }
+    }
+
+    fun resetAddEquipmentState() {
+        _addEquipmentState.value = AddEquipmentUiState()
+    }
+
     fun deleteCustomEquipment(equipment: Equipment) {
-        if (!equipment.isCustom) return
         viewModelScope.launch {
-            equipmentRepository.deleteEquipment(equipment)
+            val result = equipmentRepository.deleteEquipment(equipment)
+            if (result is EquipmentDeletionResult.Failure) {
+                _uiState.update { it.copy(equipmentActionError = result.error.message) }
+            }
         }
+    }
+
+    fun clearEquipmentActionError() {
+        _uiState.update { it.copy(equipmentActionError = null) }
     }
 
     fun loadLocation(locationId: Long) {
@@ -133,7 +167,13 @@ class EquipmentViewModel @Inject constructor(
         viewModelScope.launch {
             _locationDetailState.update { it.copy(isSaving = true, saveError = null) }
             try {
-                val existing = equipmentRepository.getLocationById(locationId) ?: return@launch
+                val existing = equipmentRepository.getLocationById(locationId)
+                if (existing == null) {
+                    _locationDetailState.update {
+                        it.copy(isSaving = false, saveError = "This location no longer exists.")
+                    }
+                    return@launch
+                }
                 equipmentRepository.updateLocation(
                     existing.copy(
                         name = state.name.trim(),
@@ -156,9 +196,22 @@ class EquipmentViewModel @Inject constructor(
         val state = _locationDetailState.value
         val locationId = state.locationId ?: return
         viewModelScope.launch {
-            val existing = equipmentRepository.getLocationById(locationId) ?: return@launch
-            equipmentRepository.deleteLocation(existing)
-            _locationDetailState.update { LocationDetailUiState(isDeleted = true) }
+            _locationDetailState.update { it.copy(isSaving = true, saveError = null) }
+            try {
+                val existing = equipmentRepository.getLocationById(locationId)
+                if (existing == null) {
+                    _locationDetailState.update {
+                        it.copy(isSaving = false, saveError = "This location no longer exists.")
+                    }
+                    return@launch
+                }
+                equipmentRepository.deleteLocation(existing)
+                _locationDetailState.update { LocationDetailUiState(isDeleted = true) }
+            } catch (e: Exception) {
+                _locationDetailState.update {
+                    it.copy(isSaving = false, saveError = e.message ?: "Failed to delete location")
+                }
+            }
         }
     }
 
@@ -175,8 +228,16 @@ data class LocationSummary(
 data class EquipmentManagementUiState(
     val locations: List<LocationSummary> = emptyList(),
     val allEquipment: List<Equipment> = emptyList(),
+    val builtInEquipment: List<Equipment> = emptyList(),
     val customEquipment: List<Equipment> = emptyList(),
-    val isLoading: Boolean = true
+    val isLoading: Boolean = true,
+    val equipmentActionError: String? = null
+)
+
+data class AddEquipmentUiState(
+    val isSaving: Boolean = false,
+    val error: String? = null,
+    val createdEquipmentId: Long? = null
 )
 
 data class LocationDetailUiState(

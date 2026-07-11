@@ -10,6 +10,11 @@ import javax.inject.Singleton
 class EquipmentRepository @Inject constructor(
     private val equipmentDao: EquipmentDao
 ) {
+    companion object {
+        const val MAX_NAME_LENGTH = 60
+        const val MAX_DESCRIPTION_LENGTH = 200
+    }
+
     // Equipment
     fun getAllEquipment(): Flow<List<Equipment>> = equipmentDao.getAll()
 
@@ -21,20 +26,66 @@ class EquipmentRepository @Inject constructor(
 
     suspend fun getEquipmentById(id: Long): Equipment? = equipmentDao.getById(id)
 
-    suspend fun createEquipment(name: String, description: String = "", isPortable: Boolean = false): Long {
-        return equipmentDao.insert(
+    suspend fun getEquipmentByNameIgnoreCase(name: String): Equipment? =
+        equipmentDao.findByNameIgnoreCase(name)
+
+    /**
+     * Validates and creates a custom equipment row. Rejects blank/too-long names and
+     * case/whitespace-insensitive duplicates of any existing equipment (built-in or custom) so
+     * users can't shadow a built-in item or create duplicate custom rows.
+     */
+    suspend fun createEquipment(
+        name: String,
+        description: String = "",
+        isPortable: Boolean = false
+    ): EquipmentSaveResult {
+        val trimmedName = name.trim()
+        if (trimmedName.isBlank()) {
+            return EquipmentSaveResult.Failure(EquipmentValidationError.BlankName)
+        }
+        if (trimmedName.length > MAX_NAME_LENGTH) {
+            return EquipmentSaveResult.Failure(EquipmentValidationError.NameTooLong(MAX_NAME_LENGTH))
+        }
+        val duplicate = equipmentDao.findByNameIgnoreCase(trimmedName)
+        if (duplicate != null) {
+            return EquipmentSaveResult.Failure(EquipmentValidationError.DuplicateName(duplicate.name))
+        }
+        val trimmedDescription = description.trim().take(MAX_DESCRIPTION_LENGTH)
+        val id = equipmentDao.insert(
             Equipment(
-                name = name,
-                description = description,
+                name = trimmedName,
+                description = trimmedDescription,
                 isPortable = isPortable,
                 isCustom = true
             )
         )
+        val created = equipmentDao.getById(id)
+            ?: return EquipmentSaveResult.Failure(EquipmentValidationError.PersistFailed)
+        return EquipmentSaveResult.Success(created)
     }
 
     suspend fun updateEquipment(equipment: Equipment) = equipmentDao.update(equipment)
 
-    suspend fun deleteEquipment(equipment: Equipment) = equipmentDao.delete(equipment)
+    /**
+     * Deletes custom equipment only after confirming it still exists and is not referenced by any
+     * exercise or location, so removal never silently strips equipment out of a user's saved data.
+     */
+    suspend fun deleteEquipment(equipment: Equipment): EquipmentDeletionResult {
+        if (!equipment.isCustom) {
+            return EquipmentDeletionResult.Failure(EquipmentDeletionError.NotCustom)
+        }
+        val current = equipmentDao.getById(equipment.id)
+            ?: return EquipmentDeletionResult.Failure(EquipmentDeletionError.NotFound)
+        val exerciseRefs = equipmentDao.countExerciseReferences(current.id)
+        val locationRefs = equipmentDao.countLocationReferences(current.id)
+        if (exerciseRefs > 0 || locationRefs > 0) {
+            return EquipmentDeletionResult.Failure(
+                EquipmentDeletionError.InUse(exerciseRefs, locationRefs)
+            )
+        }
+        equipmentDao.delete(current)
+        return EquipmentDeletionResult.Success
+    }
 
     // Locations
     fun getAllLocations(): Flow<List<EquipmentLocation>> = equipmentDao.getAllLocations()

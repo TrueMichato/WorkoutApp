@@ -17,6 +17,7 @@ import com.example.workoutapp.data.model.WorkoutCategory
 import com.example.workoutapp.data.model.decodeTrainingPhasePresets
 import com.example.workoutapp.data.model.persistedJson
 import com.example.workoutapp.data.repository.EquipmentRepository
+import com.example.workoutapp.data.repository.EquipmentSaveResult
 import com.example.workoutapp.data.repository.ExerciseRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -183,15 +184,34 @@ class AddEditExerciseViewModel @Inject constructor(
     }
 
     fun createCustomEquipment(name: String, description: String, isPortable: Boolean) {
-        if (name.isBlank()) return
+        if (_uiState.value.isCreatingEquipment) return // debounce double-taps while a save is in flight
         viewModelScope.launch {
-            val newId = equipmentRepository.createEquipment(name.trim(), description.trim(), isPortable)
-            val newEquipment = equipmentRepository.getEquipmentById(newId) ?: return@launch
-            _uiState.update { state ->
-                if (state.selectedEquipment.any { it.id == newId }) state
-                else state.copy(selectedEquipment = state.selectedEquipment + newEquipment, saveError = null)
+            _uiState.update { it.copy(isCreatingEquipment = true, equipmentCreationError = null) }
+            when (val result = equipmentRepository.createEquipment(name, description, isPortable)) {
+                is EquipmentSaveResult.Success -> _uiState.update { state ->
+                    val equipment = result.equipment
+                    val alreadySelected = state.selectedEquipment.any { it.id == equipment.id }
+                    state.copy(
+                        isCreatingEquipment = false,
+                        equipmentCreationError = null,
+                        selectedEquipment = if (alreadySelected) state.selectedEquipment else state.selectedEquipment + equipment,
+                        createdCustomEquipmentId = equipment.id
+                    )
+                }
+                is EquipmentSaveResult.Failure -> _uiState.update {
+                    it.copy(isCreatingEquipment = false, equipmentCreationError = result.error.message)
+                }
             }
         }
+    }
+
+    /** Clears the one-shot "just created" signal after the caller has reacted to it. */
+    fun consumeCreatedCustomEquipmentSignal() {
+        _uiState.update { it.copy(createdCustomEquipmentId = null) }
+    }
+
+    fun clearEquipmentCreationError() {
+        _uiState.update { it.copy(equipmentCreationError = null) }
     }
 
     fun togglePrimaryMuscle(muscle: MuscleGroup) {
@@ -592,5 +612,8 @@ data class AddEditExerciseUiState(
     val mediaDirty: Boolean = false,
     val externalUrlsDirty: Boolean = false,
     val presetsDirty: Boolean = false,
-    val removedLocalMediaUris: List<Uri> = emptyList()
+    val removedLocalMediaUris: List<Uri> = emptyList(),
+    val isCreatingEquipment: Boolean = false,
+    val equipmentCreationError: String? = null,
+    val createdCustomEquipmentId: Long? = null
 )

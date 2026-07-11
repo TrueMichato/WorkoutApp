@@ -10,6 +10,8 @@ import com.example.workoutapp.data.model.MuscleGroup
 import com.example.workoutapp.data.model.TrainingPhase
 import com.example.workoutapp.data.model.WorkoutCategory
 import com.example.workoutapp.data.repository.EquipmentRepository
+import com.example.workoutapp.data.repository.EquipmentSaveResult
+import com.example.workoutapp.data.repository.EquipmentValidationError
 import com.example.workoutapp.data.repository.ExerciseRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
@@ -80,7 +82,7 @@ class ExerciseCsvImporter @Inject constructor(
                 val estimatedDurationSeconds = record["estimated_duration_seconds"]?.toIntOrNull()?.coerceIn(30, 3600) ?: 180
                 val presets = buildPhasePresets(record, defaultSets, defaultReps, defaultRest)
 
-                val equipmentIds = resolveEquipmentIds(record["equipment"], equipmentCache)
+                val equipmentIds = resolveEquipmentIds(record["equipment"], equipmentCache, rowNumber, errors)
                 val exercise = Exercise(
                     name = name,
                     description = record["description"].orEmpty(),
@@ -123,19 +125,33 @@ class ExerciseCsvImporter @Inject constructor(
 
     private suspend fun resolveEquipmentIds(
         rawEquipment: String?,
-        equipmentCache: MutableMap<String, Equipment>
+        equipmentCache: MutableMap<String, Equipment>,
+        rowNumber: Int,
+        errors: MutableList<String>
     ): List<Long> {
         val ids = mutableListOf<Long>()
         tokenize(rawEquipment).forEach { equipmentName ->
-            val key = equipmentName.lowercase()
-            val equipment = equipmentCache[key] ?: run {
-                val newId = equipmentRepository.createEquipment(equipmentName, isPortable = false)
-                val created = equipmentRepository.getEquipmentById(newId)
-                    ?: error("Failed to create equipment \"$equipmentName\".")
-                equipmentCache[key] = created
-                created
+            val key = equipmentName.trim().lowercase()
+            val equipment = equipmentCache[key] ?: when (
+                val result = equipmentRepository.createEquipment(equipmentName, isPortable = false)
+            ) {
+                is EquipmentSaveResult.Success -> result.equipment.also { equipmentCache[key] = it }
+                is EquipmentSaveResult.Failure -> when (val error = result.error) {
+                    is EquipmentValidationError.DuplicateName -> {
+                        // Cache miss but the row already exists in the DB (e.g. two rows use the
+                        // same equipment name with different casing/whitespace within one import) -
+                        // reuse the existing row instead of dropping the reference.
+                        equipmentRepository.getEquipmentByNameIgnoreCase(equipmentName)?.also {
+                            equipmentCache[key] = it
+                        }
+                    }
+                    else -> {
+                        errors += "Row $rowNumber: equipment \"$equipmentName\" was skipped (${error.message})"
+                        null
+                    }
+                }
             }
-            ids += equipment.id
+            if (equipment != null) ids += equipment.id
         }
         return ids.distinct()
     }

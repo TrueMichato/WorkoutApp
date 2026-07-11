@@ -38,6 +38,15 @@ interface EquipmentDao {
     @Query("SELECT COUNT(*) FROM equipment")
     suspend fun getCount(): Int
 
+    @Query("SELECT * FROM equipment WHERE LOWER(TRIM(name)) = LOWER(TRIM(:name)) LIMIT 1")
+    suspend fun findByNameIgnoreCase(name: String): Equipment?
+
+    @Query("SELECT COUNT(*) FROM exercise_equipment WHERE equipmentId = :equipmentId")
+    suspend fun countExerciseReferences(equipmentId: Long): Int
+
+    @Query("SELECT COUNT(*) FROM location_equipment WHERE equipmentId = :equipmentId")
+    suspend fun countLocationReferences(equipmentId: Long): Int
+
     // Location CRUD
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLocation(location: EquipmentLocation): Long

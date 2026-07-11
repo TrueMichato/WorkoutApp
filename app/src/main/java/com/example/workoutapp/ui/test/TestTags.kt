@@ -54,6 +54,16 @@ object TestTags {
             "add_edit_exercise_preset_phase_${phase.name.lowercase()}"
     }
 
+    object Equipment {
+        const val Screen = "equipment_management_screen"
+        const val AddButton = "equipment_add_button"
+        const val NameField = "equipment_name_field"
+        const val CreateButton = "equipment_create_button"
+        const val ErrorText = "equipment_error_text"
+
+        fun row(equipmentId: Long): String = "equipment_row_$equipmentId"
+    }
+
     object Workout {
         const val Screen = "workout_screen"
         const val NewPlanButton = "workout_new_plan_button"

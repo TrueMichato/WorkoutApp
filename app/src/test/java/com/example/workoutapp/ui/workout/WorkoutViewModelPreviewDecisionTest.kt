@@ -298,6 +298,9 @@ private class FakeEquipmentDao : EquipmentDao {
     override suspend fun update(equipment: Equipment) = Unit
     override suspend fun delete(equipment: Equipment) = Unit
     override suspend fun getById(id: Long): Equipment? = null
+    override suspend fun findByNameIgnoreCase(name: String): Equipment? = null
+    override suspend fun countExerciseReferences(equipmentId: Long): Int = 0
+    override suspend fun countLocationReferences(equipmentId: Long): Int = 0
     override fun getAll(): Flow<List<Equipment>> = flowOf(emptyList())
     override fun getPortable(): Flow<List<Equipment>> = flowOf(emptyList())
     override fun getCustom(): Flow<List<Equipment>> = flowOf(emptyList())
