@@ -29,6 +29,7 @@ object TestTags {
         const val SearchField = "exercises_search_field"
         const val AddFab = "exercises_add_fab"
         const val ImportButton = "exercises_import_button"
+        const val SaveTemplateButton = "exercises_save_template_button"
         const val FilterButton = "exercises_filter_button"
 
         fun libraryFilter(filter: ExerciseLibraryFilter): String =

@@ -4,6 +4,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.workoutapp.data.local.WorkoutDatabase
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.workoutapp.data.csv.ExerciseCsvImporter
+import com.example.workoutapp.data.csv.ExerciseCsvTemplateExporter
 import com.example.workoutapp.data.local.MediaStorageManager
 import com.example.workoutapp.data.model.Difficulty
 import com.example.workoutapp.data.model.Exercise
@@ -61,6 +62,9 @@ class ExerciseProtectionInstrumentedTest {
 
     @Inject
     lateinit var exerciseCsvImporter: ExerciseCsvImporter
+
+    @Inject
+    lateinit var exerciseCsvTemplateExporter: ExerciseCsvTemplateExporter
 
     @Before
     fun setUp() {
@@ -157,7 +161,7 @@ class ExerciseProtectionInstrumentedTest {
             primaryMuscles = emptyList()
         )
         exerciseRepository.archiveExercise(archivedId)
-        val viewModel = ExercisesViewModel(exerciseRepository, exerciseCsvImporter)
+        val viewModel = ExercisesViewModel(exerciseRepository, exerciseCsvImporter, exerciseCsvTemplateExporter)
 
         val activeState = viewModel.uiState.first { !it.isLoading && it.exercises.any { exercise -> exercise.id == activeId } }
 
