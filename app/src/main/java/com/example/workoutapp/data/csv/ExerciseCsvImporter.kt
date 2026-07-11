@@ -12,6 +12,7 @@ import com.example.workoutapp.data.model.WorkoutCategory
 import com.example.workoutapp.data.repository.EquipmentRepository
 import com.example.workoutapp.data.repository.EquipmentSaveResult
 import com.example.workoutapp.data.repository.EquipmentValidationError
+import com.example.workoutapp.data.repository.ExerciseFamilyLinkResult
 import com.example.workoutapp.data.repository.ExerciseRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.first
@@ -67,9 +68,16 @@ class ExerciseCsvImporter @Inject constructor(
             )
         }
 
-        val existingNames = exerciseRepository.getAllExercises().first()
+        val existingExercises = exerciseRepository.getAllExercises().first()
+        val existingNames = existingExercises
             .map { it.name.trim().lowercase() }
             .toMutableSet()
+        // Every exercise's id by normalized name, seeded from the existing library and grown as
+        // rows are imported below, so a variation row's main_exercise can resolve to either a
+        // pre-existing exercise or one created earlier/later in this same file - family linking
+        // is resolved in a second pass after every row has been imported, so row order in the
+        // CSV never matters.
+        val idsByLowerName = existingExercises.associate { it.name.trim().lowercase() to it.id }.toMutableMap()
         val equipmentCache = equipmentRepository.getAllEquipment().first()
             .associateBy { it.name.trim().lowercase() }
             .toMutableMap()
@@ -77,6 +85,9 @@ class ExerciseCsvImporter @Inject constructor(
         var imported = 0
         var skipped = 0
         val errors = mutableListOf<String>()
+        // (rowNumber, thisExerciseId, mainExerciseName, focus) for every successfully-imported
+        // row that requested a family link, resolved in the second pass below.
+        val pendingFamilyLinks = mutableListOf<PendingFamilyLink>()
 
         val unknownHeaders = ExerciseCsvSchema.unknownHeaders(headers)
         if (unknownHeaders.isNotEmpty()) {
@@ -124,7 +135,7 @@ class ExerciseCsvImporter @Inject constructor(
                     trainingPhasePresets = json.encodeToString(presets.mapKeys { it.key.name }),
                     personalNotes = record["personal_notes"].orEmpty()
                 )
-                exerciseRepository.createExerciseWithRelations(
+                val newExerciseId = exerciseRepository.createExerciseWithRelations(
                     exercise = exercise,
                     categories = categories,
                     equipmentIds = equipmentIds,
@@ -132,7 +143,19 @@ class ExerciseCsvImporter @Inject constructor(
                     secondaryMuscles = parseMuscles(record["secondary_muscles"])
                 )
                 existingNames += normalizedName
+                idsByLowerName[normalizedName] = newExerciseId
                 imported += 1
+
+                val mainExerciseName = record["main_exercise"]?.trim().orEmpty()
+                if (mainExerciseName.isNotEmpty()) {
+                    pendingFamilyLinks += PendingFamilyLink(
+                        rowNumber = rowNumber,
+                        exerciseId = newExerciseId,
+                        exerciseName = name,
+                        mainExerciseName = mainExerciseName,
+                        focus = record["variation_focus"].orEmpty()
+                    )
+                }
             } catch (e: IllegalArgumentException) {
                 skipped += 1
                 errors += "Row $rowNumber: ${e.message}"
@@ -142,12 +165,39 @@ class ExerciseCsvImporter @Inject constructor(
             }
         }
 
+        // Second pass: resolve and apply every requested family link now that every row's
+        // exercise (regardless of its position in the file) has already been created, so a
+        // variation row can appear before or after its main exercise's row.
+        pendingFamilyLinks.forEach { pending ->
+            val parentId = idsByLowerName[pending.mainExerciseName.trim().lowercase()]
+            if (parentId == null) {
+                errors += "Row ${pending.rowNumber}: main exercise \"${pending.mainExerciseName}\" for " +
+                    "\"${pending.exerciseName}\" was not found; the exercise was imported standalone."
+                return@forEach
+            }
+            when (val result = exerciseRepository.linkVariationResult(parentId, pending.exerciseId, pending.focus)) {
+                is ExerciseFamilyLinkResult.Success -> Unit
+                is ExerciseFamilyLinkResult.Failure -> {
+                    errors += "Row ${pending.rowNumber}: could not link \"${pending.exerciseName}\" as a variation " +
+                        "of \"${pending.mainExerciseName}\" (${result.error.message}); the exercise was imported standalone."
+                }
+            }
+        }
+
         return ExerciseCsvImportResult(
             importedCount = imported,
             skippedCount = skipped,
             errors = errors
         )
     }
+
+    private data class PendingFamilyLink(
+        val rowNumber: Int,
+        val exerciseId: Long,
+        val exerciseName: String,
+        val mainExerciseName: String,
+        val focus: String
+    )
 
     private suspend fun resolveEquipmentIds(
         rawEquipment: String?,

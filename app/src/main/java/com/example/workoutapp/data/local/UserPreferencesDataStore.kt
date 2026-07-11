@@ -34,6 +34,7 @@ class UserPreferencesDataStore @Inject constructor(
 ) {
     private object Keys {
         val HAS_CUSTOMIZED_PROFILE = booleanPreferencesKey("has_customized_training_profile")
+        val GENERATOR_FAMILY_DEDUP_ENABLED = booleanPreferencesKey("generator_family_dedup_enabled")
     }
 
     val hasCustomizedProfile: Flow<Boolean> =
@@ -41,5 +42,19 @@ class UserPreferencesDataStore @Inject constructor(
 
     suspend fun markProfileCustomized() {
         dataStore.edit { prefs -> prefs[Keys.HAS_CUSTOMIZED_PROFILE] = true }
+    }
+
+    /**
+     * Whether the workout generator (and its swap/regenerate paths) should limit itself to at
+     * most one member of an exercise family (e.g. only one push-up variant) per generated
+     * workout. Defaults to true when unset, so first-run users and installs that never touched
+     * this setting get the safer, deduplicated behavior. Explicit saved plans/history are never
+     * affected by this setting either way - it only governs the generation algorithm.
+     */
+    val generatorFamilyDedupEnabled: Flow<Boolean> =
+        dataStore.data.map { prefs -> prefs[Keys.GENERATOR_FAMILY_DEDUP_ENABLED] ?: true }
+
+    suspend fun setGeneratorFamilyDedupEnabled(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[Keys.GENERATOR_FAMILY_DEDUP_ENABLED] = enabled }
     }
 }

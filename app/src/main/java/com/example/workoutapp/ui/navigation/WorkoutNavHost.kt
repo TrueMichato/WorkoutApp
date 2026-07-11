@@ -115,6 +115,12 @@ fun WorkoutNavHost(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToEdit = {
                     navController.navigate(Screen.EditExercise.createRoute(exerciseId))
+                },
+                onNavigateToExercise = { targetExerciseId ->
+                    navController.navigate(Screen.ExerciseDetail.createRoute(targetExerciseId))
+                },
+                onNavigateToCreateVariation = { parentExerciseId ->
+                    navController.navigate(Screen.AddVariation.createRoute(parentExerciseId))
                 }
             )
         }
@@ -122,6 +128,18 @@ fun WorkoutNavHost(
         composable(Screen.AddExercise.route) {
             AddEditExerciseScreen(
                 exerciseId = null,
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Screen.AddVariation.route,
+            arguments = listOf(navArgument("parentExerciseId") { type = NavType.LongType })
+        ) { backStackEntry ->
+            val parentExerciseId = backStackEntry.arguments?.getLong("parentExerciseId") ?: return@composable
+            AddEditExerciseScreen(
+                exerciseId = null,
+                newVariationOfParentId = parentExerciseId,
                 onNavigateBack = { navController.popBackStack() }
             )
         }

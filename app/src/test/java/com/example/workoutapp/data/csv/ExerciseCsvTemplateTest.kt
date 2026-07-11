@@ -13,8 +13,8 @@ class ExerciseCsvTemplateTest {
     private val records by lazy { ExerciseCsvParser.parse(ExerciseCsvTemplate.render()) }
 
     @Test
-    fun render_producesExactlyTwoIllustrativeRows() {
-        assertEquals(2, records.size)
+    fun render_producesExactlyThreeIllustrativeRows() {
+        assertEquals(3, records.size)
     }
 
     @Test
@@ -58,5 +58,15 @@ class ExerciseCsvTemplateTest {
         val decoded = String(bytes, Charsets.UTF_8)
 
         assertEquals(ExerciseCsvTemplate.render(), decoded)
+    }
+
+    @Test
+    fun render_thirdRowDemonstratesAFamilyVariationLinkedByName() {
+        val diamondPushUp = records.first { it["name"] == "Diamond Push-Up" }
+
+        assertEquals("Push-Up", diamondPushUp["main_exercise"])
+        assertEquals("Triceps emphasis", diamondPushUp["variation_focus"])
+        // Its main exercise's row must also exist under that exact name so the reference resolves.
+        assertTrue(records.any { it["name"] == "Push-Up" })
     }
 }

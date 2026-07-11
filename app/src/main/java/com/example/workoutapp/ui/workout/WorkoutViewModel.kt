@@ -3,6 +3,7 @@ package com.example.workoutapp.ui.workout
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.workoutapp.data.local.UserPreferencesDataStore
 import com.example.workoutapp.data.model.EquipmentLocation
 import com.example.workoutapp.data.model.Exercise
 import com.example.workoutapp.data.model.ExerciseCompletionState
@@ -77,6 +78,7 @@ class WorkoutViewModel @Inject constructor(
     private val userGoalRepository: UserGoalRepository,
     private val mlFeedbackRepository: MLFeedbackRepository,
     private val workoutPlanner: WorkoutPlanner,
+    private val userPreferencesDataStore: UserPreferencesDataStore,
     private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
     // --- Generator state ---
@@ -161,7 +163,8 @@ class WorkoutViewModel @Inject constructor(
         userGoalRepository.hasCustomizedProfileFlow(),
         _selectedLocationId,
         _durationMinutes,
-        _excludedPreviewExerciseIds
+        _excludedPreviewExerciseIds,
+        userPreferencesDataStore.generatorFamilyDedupEnabled
     ) { args: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
         val locations = args[0] as List<EquipmentLocation>
@@ -178,6 +181,7 @@ class WorkoutViewModel @Inject constructor(
         val durationMinutes = args[5] as Int?
         @Suppress("UNCHECKED_CAST")
         val excludedPreviewExerciseIds = args[6] as Set<Long>
+        val familyDedupEnabled = args[7] as Boolean
 
         GeneratorBaseState(
             locations = locations,
@@ -186,7 +190,8 @@ class WorkoutViewModel @Inject constructor(
             durationMinutes = durationMinutes ?: userGoal.preferredSessionDurationMinutes,
             currentPhase = userGoal.currentPhase,
             excludedPreviewExerciseIds = excludedPreviewExerciseIds,
-            hasSavedProfile = hasCustomizedProfile
+            hasSavedProfile = hasCustomizedProfile,
+            familyDedupEnabled = familyDedupEnabled
         )
     }
 
@@ -228,7 +233,8 @@ class WorkoutViewModel @Inject constructor(
             generatedSessionId = st.generatedSessionId, previewDraft = st.previewDraft,
             hasPreviewCustomizations = sel.base.excludedPreviewExerciseIds.isNotEmpty(),
             isSavingPlan = st.isSavingPlan,
-            planSaveMessage = st.planSaveMessage
+            planSaveMessage = st.planSaveMessage,
+            familyDedupEnabled = sel.base.familyDedupEnabled
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WorkoutGeneratorUiState(isLoading = true))
 
@@ -333,6 +339,19 @@ class WorkoutViewModel @Inject constructor(
     fun clearCategories() {
         _selectedCategories.value = emptySet()
         savedStateHandle[KEY_GEN_CATEGORIES_JSON] = encodeGeneratorCategorySelection(emptySet())
+        invalidateGeneratorPreview()
+    }
+
+    /**
+     * Persists the "Limit to one variation per exercise family" toggle. This is a durable user
+     * setting (survives process death and app restarts), not part of the in-progress generator
+     * setup, so it is intentionally left untouched by [resetGeneratorSetup]. It affects generate,
+     * "Regenerate", and "Swap" identically since they all read [currentGenerationParams].
+     */
+    fun setFamilyDedupEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            userPreferencesDataStore.setGeneratorFamilyDedupEnabled(enabled)
+        }
         invalidateGeneratorPreview()
     }
 
@@ -867,7 +886,8 @@ class WorkoutViewModel @Inject constructor(
             durationMinutes = s.durationMinutes,
             selectedCategories = s.selectedCategories,
             timeSlot = s.selectedTimeSlot,
-            excludedExerciseIds = _excludedPreviewExerciseIds.value
+            excludedExerciseIds = _excludedPreviewExerciseIds.value,
+            enforceFamilyDedup = s.familyDedupEnabled
         )
     }
 
@@ -1114,7 +1134,8 @@ private data class GeneratorBaseState(
     val locations: List<EquipmentLocation> = emptyList(), val selectedLocationId: Long? = null,
     val defaultLocationId: Long? = null, val durationMinutes: Int = 60, val currentPhase: TrainingPhase = TrainingPhase.BALANCED,
     val excludedPreviewExerciseIds: Set<Long> = emptySet(),
-    val hasSavedProfile: Boolean = false
+    val hasSavedProfile: Boolean = false,
+    val familyDedupEnabled: Boolean = true
 )
 private data class GeneratorSelectionState(val base: GeneratorBaseState, val selectedCategories: List<WorkoutCategory>, val selectedTimeSlot: TimeSlot)
 private data class GeneratorStatusState(
@@ -1150,6 +1171,9 @@ data class WorkoutGeneratorUiState(
     val hasPreviewCustomizations: Boolean = false,
     val isSavingPlan: Boolean = false,
     val planSaveMessage: String? = null,
+    // Persisted "Allow multiple variations per family" toggle (default ON = dedup enforced).
+    // See UserPreferencesDataStore.generatorFamilyDedupEnabled.
+    val familyDedupEnabled: Boolean = true,
     val isLoading: Boolean = false
 )
 

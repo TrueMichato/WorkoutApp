@@ -309,7 +309,89 @@ object SampleExercises {
             isCompound = false,
             defaultSets = 1,
             defaultReps = "10 min practice"
+        ),
+
+        // PUSH-UP FAMILY (main exercise + variations, linked via exercise_variations by
+        // WorkoutDatabaseSeeder.seedExerciseVariations - see PUSH_UP_FAMILY below). Appended at
+        // the end of this list, not inserted earlier, so existing installs' already-seeded
+        // exercise ids never shift.
+        SampleExercise(
+            name = "Push-up",
+            description = "The classic bodyweight chest press. A compound movement that builds upper body pressing strength anywhere.",
+            instructions = "1. Start in a plank with hands slightly wider than shoulders\n2. Keep body in a straight line from head to heels\n3. Lower chest toward the floor, elbows at about 45 degrees\n4. Press back up to full arm extension",
+            tips = "Keep your core tight and don't let your hips sag or pike.",
+            difficulty = Difficulty.NOVICE,
+            categories = listOf(WorkoutCategory.STRENGTH, WorkoutCategory.HYPERTROPHY),
+            equipmentNames = listOf("No Equipment"),
+            primaryMuscles = listOf(MuscleGroup.CHEST, MuscleGroup.TRICEPS),
+            secondaryMuscles = listOf(MuscleGroup.FRONT_DELTS, MuscleGroup.ABS),
+            defaultReps = "10-20"
+        ),
+        SampleExercise(
+            name = "Tiger Push-up",
+            description = "A push-up variation with a deep bent-arm start position that shifts emphasis onto the triceps.",
+            instructions = "1. Start kneeling with hands planted and elbows bent close to the ribs\n2. Lower chin toward the floor by extending the arms forward\n3. Push back through the arms to return to the start position",
+            tips = "Move slowly - the extended lever on the elbows makes this harder than it looks.",
+            difficulty = Difficulty.INTERMEDIATE,
+            categories = listOf(WorkoutCategory.STRENGTH, WorkoutCategory.HYPERTROPHY),
+            equipmentNames = listOf("No Equipment"),
+            primaryMuscles = listOf(MuscleGroup.TRICEPS, MuscleGroup.CHEST),
+            secondaryMuscles = listOf(MuscleGroup.FRONT_DELTS),
+            defaultReps = "6-12"
+        ),
+        SampleExercise(
+            name = "Pike Push-up",
+            description = "A push-up variation performed with hips raised so the pressing angle shifts emphasis onto the shoulders.",
+            instructions = "1. Start in a downward-dog position with hips high and hands shoulder-width apart\n2. Bend the elbows to lower the top of your head toward the floor\n3. Press back up through the shoulders to the start position",
+            tips = "Keep hips high throughout - the higher the hips, the more vertical (shoulder-dominant) the press becomes.",
+            difficulty = Difficulty.INTERMEDIATE,
+            categories = listOf(WorkoutCategory.STRENGTH, WorkoutCategory.HYPERTROPHY),
+            equipmentNames = listOf("No Equipment"),
+            primaryMuscles = listOf(MuscleGroup.FRONT_DELTS, MuscleGroup.SIDE_DELTS),
+            secondaryMuscles = listOf(MuscleGroup.TRICEPS),
+            defaultReps = "6-12"
+        ),
+        SampleExercise(
+            name = "Plyometric Push-up",
+            description = "An explosive push-up variation that develops upper body power via a clapping or hand-lift push-off.",
+            instructions = "1. Start in a standard push-up position\n2. Lower under control to the bottom position\n3. Push up explosively so the hands leave the floor\n4. Land softly with bent elbows and reset before the next rep",
+            tips = "Prioritize a soft landing over height - control on the way down matters more than how far you leave the floor.",
+            difficulty = Difficulty.ADVANCED,
+            categories = listOf(WorkoutCategory.STRENGTH, WorkoutCategory.ENDURANCE),
+            equipmentNames = listOf("No Equipment"),
+            primaryMuscles = listOf(MuscleGroup.CHEST, MuscleGroup.TRICEPS),
+            secondaryMuscles = listOf(MuscleGroup.FRONT_DELTS, MuscleGroup.ABS),
+            defaultSets = 3,
+            defaultReps = "5-10"
+        ),
+        SampleExercise(
+            name = "Slow Push-up",
+            description = "A tempo-controlled push-up variation that emphasizes time under tension and isometric control over speed or load.",
+            instructions = "1. Start in a standard push-up position\n2. Lower over a slow count (e.g. 4-5 seconds)\n3. Pause briefly just above the floor\n4. Press back up over a slow, controlled count",
+            tips = "Resist the urge to speed up near the top or bottom - constant tempo is the point of this variation.",
+            difficulty = Difficulty.INTERMEDIATE,
+            categories = listOf(WorkoutCategory.STRENGTH, WorkoutCategory.HYPERTROPHY),
+            equipmentNames = listOf("No Equipment"),
+            primaryMuscles = listOf(MuscleGroup.CHEST, MuscleGroup.TRICEPS),
+            secondaryMuscles = listOf(MuscleGroup.FRONT_DELTS, MuscleGroup.ABS),
+            defaultSets = 3,
+            defaultReps = "6-10"
         )
+    )
+
+    /**
+     * Family links seeded alongside [all] on brand-new installs (see
+     * WorkoutDatabaseSeeder.seedExerciseVariations): each pair is (variation name, focus),
+     * all linked under the "Push-up" main exercise. Names are resolved to ids at seed time from
+     * the exercise names already inserted from [all], so this list must stay in sync with the
+     * Push-up family entries above.
+     */
+    const val PUSH_UP_MAIN_NAME = "Push-up"
+    val PUSH_UP_VARIATIONS: List<Pair<String, String>> = listOf(
+        "Tiger Push-up" to "Triceps emphasis",
+        "Pike Push-up" to "Shoulder emphasis",
+        "Plyometric Push-up" to "Explosiveness",
+        "Slow Push-up" to "Tempo / isometric control"
     )
 }
 

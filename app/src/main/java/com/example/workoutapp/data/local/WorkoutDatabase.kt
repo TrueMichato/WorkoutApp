@@ -39,7 +39,8 @@ import com.example.workoutapp.data.model.*
         ExerciseMuscleCrossRef::class,
         ExerciseCustomCategoryCrossRef::class,
         LocationEquipmentCrossRef::class,
-        PTRoutineExerciseCrossRef::class
+        PTRoutineExerciseCrossRef::class,
+        ExerciseVariationCrossRef::class
     ],
     version = WorkoutDatabaseMigrations.CURRENT_VERSION,
     exportSchema = true

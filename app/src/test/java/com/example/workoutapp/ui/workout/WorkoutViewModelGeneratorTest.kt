@@ -1,6 +1,7 @@
 package com.example.workoutapp.ui.workout
 
 import androidx.lifecycle.SavedStateHandle
+import com.example.workoutapp.data.local.UserPreferencesDataStore
 import com.example.workoutapp.data.model.EquipmentLocation
 import com.example.workoutapp.data.model.SessionStatus
 import com.example.workoutapp.data.model.TimeSlot
@@ -61,6 +62,7 @@ class WorkoutViewModelGeneratorTest {
     private lateinit var userGoalRepository: UserGoalRepository
     private lateinit var mlFeedbackRepository: MLFeedbackRepository
     private lateinit var workoutPlanner: WorkoutPlanner
+    private lateinit var userPreferencesDataStore: UserPreferencesDataStore
 
     @Before
     fun setUp() {
@@ -71,10 +73,12 @@ class WorkoutViewModelGeneratorTest {
         userGoalRepository = mockk(relaxed = true)
         mlFeedbackRepository = mockk(relaxed = true)
         workoutPlanner = mockk(relaxed = true)
+        userPreferencesDataStore = mockk(relaxed = true)
 
         // Exercised unconditionally by WorkoutViewModel's init block (observePlanEditorReferenceData).
         every { equipmentRepository.getAllLocations() } returns flowOf(emptyList())
         every { equipmentRepository.getDefaultLocationFlow() } returns flowOf(null)
+        every { userPreferencesDataStore.generatorFamilyDedupEnabled } returns flowOf(true)
     }
 
     @After
@@ -90,6 +94,7 @@ class WorkoutViewModelGeneratorTest {
             userGoalRepository = userGoalRepository,
             mlFeedbackRepository = mlFeedbackRepository,
             workoutPlanner = workoutPlanner,
+            userPreferencesDataStore = userPreferencesDataStore,
             savedStateHandle = savedStateHandle
         )
 

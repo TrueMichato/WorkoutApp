@@ -22,10 +22,12 @@ object ExerciseCsvTemplate {
     }
 
     /**
-     * Two illustrative rows keyed by normalized header:
+     * Three illustrative rows keyed by normalized header:
      * - a simple bodyweight strength exercise using plain values and the "|" delimiter
      * - a richer, timed carry exercise demonstrating quoted commas, alternate boolean spellings,
      *   ";" and "," delimiters, escaped quotes, and multiple training-phase overrides
+     * - a variation row linking back to the first row's exercise by name via main_exercise,
+     *   demonstrating the exercise-family columns
      */
     private fun sampleRows(): List<Map<String, String>> = listOf(
         mapOf(
@@ -45,6 +47,8 @@ object ExerciseCsvTemplate {
             "primary_muscles" to "Chest|Triceps",
             "secondary_muscles" to "Front Delts",
             "personal_notes" to "",
+            "main_exercise" to "",
+            "variation_focus" to "",
             ExerciseCsvSchema.phaseHeader(TrainingPhase.HYPERTROPHY_FOCUS, "reps") to "10-15"
         ),
         mapOf(
@@ -64,6 +68,8 @@ object ExerciseCsvTemplate {
             "primary_muscles" to "Forearms;Grip",
             "secondary_muscles" to "Abs|Glutes",
             "personal_notes" to "",
+            "main_exercise" to "",
+            "variation_focus" to "",
             ExerciseCsvSchema.phaseHeader(TrainingPhase.STRENGTH_FOCUS, "sets") to "4",
             ExerciseCsvSchema.phaseHeader(TrainingPhase.STRENGTH_FOCUS, "reps") to "20m carry",
             ExerciseCsvSchema.phaseHeader(TrainingPhase.STRENGTH_FOCUS, "rest") to "120",
@@ -71,6 +77,26 @@ object ExerciseCsvTemplate {
             ExerciseCsvSchema.phaseHeader(TrainingPhase.HYPERTROPHY_FOCUS, "sets") to "3",
             ExerciseCsvSchema.phaseHeader(TrainingPhase.HYPERTROPHY_FOCUS, "reps") to "30-40m carry",
             ExerciseCsvSchema.phaseHeader(TrainingPhase.HYPERTROPHY_FOCUS, "rest") to "90"
+        ),
+        mapOf(
+            "name" to "Diamond Push-Up",
+            "categories" to "Strength|Hypertrophy",
+            "description" to "Push-Up variation with hands close together to shift emphasis onto the triceps.",
+            "instructions" to "Same setup as a standard push-up, but form a diamond/triangle with your thumbs and index fingers under your chest.",
+            "tips" to "Keep elbows tucked close to the body throughout the movement.",
+            "difficulty" to "Intermediate",
+            "is_compound" to "true",
+            "is_unilateral" to "false",
+            "default_sets" to "3",
+            "default_reps" to "6-10",
+            "default_rest_seconds" to "60",
+            "estimated_duration_seconds" to "180",
+            "equipment" to "",
+            "primary_muscles" to "Triceps|Chest",
+            "secondary_muscles" to "Front Delts",
+            "personal_notes" to "",
+            "main_exercise" to "Push-Up",
+            "variation_focus" to "Triceps emphasis"
         )
     )
 }

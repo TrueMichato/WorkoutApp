@@ -102,6 +102,43 @@ class WorkoutDatabaseSeederTest {
         )
     }
 
+    @Test
+    fun seedDefaultsLinksPushUpVariationsToPushUpMainExercise() {
+        val db = openSeededDatabase().openHelper.writableDatabase
+
+        val mainId = db.longForQuery("SELECT id FROM exercises WHERE name = 'Push-up'")
+        assertEquals(
+            SampleExercises.PUSH_UP_VARIATIONS.size.toLong(),
+            db.longForQuery("SELECT COUNT(*) FROM exercise_variations WHERE parentExerciseId = $mainId")
+        )
+        SampleExercises.PUSH_UP_VARIATIONS.forEach { (variationName, focus) ->
+            assertEquals(
+                focus,
+                db.stringForQuery(
+                    """
+                    SELECT ev.focus FROM exercise_variations ev
+                    INNER JOIN exercises ex ON ex.id = ev.variationExerciseId
+                    WHERE ex.name = '$variationName'
+                    """.trimIndent()
+                )
+            )
+        }
+    }
+
+    @Test
+    fun seedDefaultsIsIdempotentForExerciseVariations() {
+        val db = openSeededDatabase().openHelper.writableDatabase
+
+        WorkoutDatabaseSeeder.seedDefaults(db, now = 1234L)
+        WorkoutDatabaseSeeder.seedDefaults(db, now = 5678L)
+
+        val mainId = db.longForQuery("SELECT id FROM exercises WHERE name = 'Push-up'")
+        assertEquals(
+            SampleExercises.PUSH_UP_VARIATIONS.size.toLong(),
+            db.longForQuery("SELECT COUNT(*) FROM exercise_variations WHERE parentExerciseId = $mainId")
+        )
+    }
+
     private fun openSeededDatabase(): WorkoutDatabase {
         val opened = Room.databaseBuilder(context, WorkoutDatabase::class.java, TEST_DB)
             .addMigrations(*WorkoutDatabaseMigrations.ALL)

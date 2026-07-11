@@ -4,6 +4,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -110,6 +111,13 @@ class WorkoutPlanFlowTest {
         }
 
         assertTrue(composeRule.onAllNodesWithText(exerciseName).fetchSemanticsNodes().isNotEmpty())
+
+        // Wait for the active workout's own scrollable content list to be attached before
+        // scrolling within it - the exercise name text above can become queryable slightly
+        // before the LazyColumn's own tag is registered during the navigation transition.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithTag(TestTags.ActiveWorkout.ContentList).fetchSemanticsNodes().isNotEmpty()
+        }
 
         // The rich prescription summary (rounds/tempo/effort) can render below the fold in the
         // active workout's scrollable content list, so scroll each target into view before

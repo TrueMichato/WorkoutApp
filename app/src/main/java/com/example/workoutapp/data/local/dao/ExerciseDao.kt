@@ -4,6 +4,34 @@ import androidx.room.*
 import com.example.workoutapp.data.model.*
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Describes what should happen to an exercise's family relationship as part of an atomic
+ * exercise save (see [ExerciseDao.insertWithRelationsAndFamily] /
+ * [ExerciseDao.updateWithRelationsAndFamily]). [LinkTo] implicitly reparents - it detaches any
+ * existing link for this exercise before linking the new one, since the editor UI always
+ * presents this as a single "change main exercise" action, not two separate steps.
+ */
+sealed class ExerciseFamilyMutation {
+    data object NoChange : ExerciseFamilyMutation()
+    data object Detach : ExerciseFamilyMutation()
+    data class LinkTo(val parentExerciseId: Long, val focus: String) : ExerciseFamilyMutation()
+}
+
+/**
+ * Typed outcome of an atomic exercise+relations(+family) save, so a validation failure never
+ * leaves a partially-written exercise row, relation set, or family link - see
+ * [ExerciseDao.insertWithRelationsAndFamily] / [ExerciseDao.updateWithRelationsAndFamily].
+ */
+sealed class ExerciseSaveOutcome {
+    data class Success(val exerciseId: Long) : ExerciseSaveOutcome()
+    data object ExerciseNotFound : ExerciseSaveOutcome()
+    data object SelfLink : ExerciseSaveOutcome()
+    data class ParentNotFound(val parentExerciseId: Long) : ExerciseSaveOutcome()
+    data class ParentIsAlreadyVariation(val parentName: String) : ExerciseSaveOutcome()
+    data class ExerciseHasOwnVariations(val exerciseName: String) : ExerciseSaveOutcome()
+    data object AlreadyLinkedElsewhere : ExerciseSaveOutcome()
+}
+
 @Dao
 interface ExerciseDao {
 
@@ -98,12 +126,48 @@ interface ExerciseDao {
         check(referenceCount == 0) {
             "Cannot permanently delete an exercise used by workout history, saved plans, PT routines, or feedback."
         }
+        check(countVariationsForParent(exerciseId) == 0) {
+            "Cannot permanently delete an exercise that still has variations linked to it. Detach its variations first."
+        }
+        check(countLinksAsVariation(exerciseId) == 0) {
+            "Cannot permanently delete an exercise that is still linked as a variation. Detach it from its main exercise first."
+        }
         clearCategoriesForExercise(exerciseId)
         clearEquipmentForExercise(exerciseId)
         clearMusclesForExercise(exerciseId)
         clearCustomCategoriesForExercise(exerciseId)
         check(deleteById(exerciseId) == 1) { "Exercise $exerciseId no longer exists." }
     }
+
+    // Exercise family / variation links
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertVariationLink(link: ExerciseVariationCrossRef)
+
+    @Query("DELETE FROM exercise_variations WHERE variationExerciseId = :variationExerciseId")
+    suspend fun deleteVariationLink(variationExerciseId: Long): Int
+
+    @Query("UPDATE exercise_variations SET focus = :focus WHERE variationExerciseId = :variationExerciseId")
+    suspend fun updateVariationFocus(variationExerciseId: Long, focus: String): Int
+
+    @Query("SELECT * FROM exercise_variations WHERE variationExerciseId = :variationExerciseId")
+    suspend fun getVariationLink(variationExerciseId: Long): ExerciseVariationCrossRef?
+
+    @Query("SELECT * FROM exercise_variations WHERE parentExerciseId = :parentExerciseId ORDER BY variationExerciseId ASC")
+    suspend fun getVariationLinksForParent(parentExerciseId: Long): List<ExerciseVariationCrossRef>
+
+    @Query("SELECT * FROM exercise_variations WHERE parentExerciseId = :parentExerciseId ORDER BY variationExerciseId ASC")
+    fun getVariationLinksForParentFlow(parentExerciseId: Long): Flow<List<ExerciseVariationCrossRef>>
+
+    @Query("SELECT COUNT(*) FROM exercise_variations WHERE parentExerciseId = :exerciseId")
+    suspend fun countVariationsForParent(exerciseId: Long): Int
+
+    @Query("SELECT COUNT(*) FROM exercise_variations WHERE variationExerciseId = :exerciseId")
+    suspend fun countLinksAsVariation(exerciseId: Long): Int
+
+    // All links at once - used by the workout generator to resolve every exercise's family root
+    // in a single query instead of one lookup per candidate.
+    @Query("SELECT * FROM exercise_variations")
+    suspend fun getAllVariationLinks(): List<ExerciseVariationCrossRef>
 
     // Category cross-references
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -222,6 +286,136 @@ interface ExerciseDao {
         require(exercise.id != 0L) { "Exercise id is required for updates." }
         check(update(exercise) == 1) { "Exercise ${exercise.id} no longer exists." }
         replaceRelations(exercise.id, categories, equipmentIds, primaryMuscles, secondaryMuscles)
+    }
+
+    /**
+     * Atomically creates a brand-new exercise, its category/equipment/muscle relations, AND its
+     * family link (if any) in a single DB transaction. Family validity is checked BEFORE any row
+     * is written, so a rejected family mutation (self-link, missing parent, invalid nesting)
+     * leaves absolutely nothing behind - not even the exercise row itself - and the caller can
+     * safely clean up any newly-copied media because nothing referencing it was ever persisted.
+     */
+    @Transaction
+    suspend fun insertWithRelationsAndFamily(
+        exercise: Exercise,
+        categories: List<WorkoutCategory>,
+        equipmentIds: List<Long>,
+        primaryMuscles: List<MuscleGroup>,
+        secondaryMuscles: List<MuscleGroup>,
+        familyMutation: ExerciseFamilyMutation
+    ): ExerciseSaveOutcome {
+        require(exercise.id == 0L) { "New exercises cannot already have an id." }
+        validateFamilyMutation(existingExerciseId = null, mutation = familyMutation)?.let { return it }
+        val exerciseId = insert(exercise)
+        replaceRelations(exerciseId, categories, equipmentIds, primaryMuscles, secondaryMuscles)
+        applyFamilyMutation(exerciseId, familyMutation)
+        return ExerciseSaveOutcome.Success(exerciseId)
+    }
+
+    /**
+     * Atomically updates an existing exercise, replaces its relations, AND applies its family
+     * mutation (link/reparent/detach/no-change) in a single DB transaction. Family validity is
+     * checked BEFORE the exercise row or any relation is touched, and reparenting (detach old
+     * link, then link new one) happens entirely inside this same transaction - so a failed
+     * validation or a failed link insert rolls back the exercise edit too, instead of leaving a
+     * silently-detached variation with a half-saved exercise row.
+     */
+    @Transaction
+    suspend fun updateWithRelationsAndFamily(
+        exercise: Exercise,
+        categories: List<WorkoutCategory>,
+        equipmentIds: List<Long>,
+        primaryMuscles: List<MuscleGroup>,
+        secondaryMuscles: List<MuscleGroup>,
+        familyMutation: ExerciseFamilyMutation
+    ): ExerciseSaveOutcome {
+        require(exercise.id != 0L) { "Exercise id is required for updates." }
+        if (getById(exercise.id) == null) return ExerciseSaveOutcome.ExerciseNotFound
+        validateFamilyMutation(existingExerciseId = exercise.id, mutation = familyMutation)?.let { return it }
+        check(update(exercise) == 1) { "Exercise ${exercise.id} no longer exists." }
+        replaceRelations(exercise.id, categories, equipmentIds, primaryMuscles, secondaryMuscles)
+        applyFamilyMutation(exercise.id, familyMutation)
+        return ExerciseSaveOutcome.Success(exercise.id)
+    }
+
+    /**
+     * Atomically validates and links [variationExerciseId] as a variation of
+     * [parentExerciseId], closing the check-then-insert gap: without a single transaction, two
+     * concurrent callers could both pass the "not already linked" check and both attempt to
+     * insert a link. Unlike the implicit reparenting done by [updateWithRelationsAndFamily],
+     * this standalone entry point requires the variation be explicitly detached first if it is
+     * already linked elsewhere (see [ExerciseSaveOutcome.AlreadyLinkedElsewhere]).
+     */
+    @Transaction
+    suspend fun linkVariation(parentExerciseId: Long, variationExerciseId: Long, focus: String): ExerciseSaveOutcome {
+        if (getById(variationExerciseId) == null) return ExerciseSaveOutcome.ExerciseNotFound
+        if (parentExerciseId == variationExerciseId) return ExerciseSaveOutcome.SelfLink
+        val parent = getById(parentExerciseId) ?: return ExerciseSaveOutcome.ParentNotFound(parentExerciseId)
+        if (countLinksAsVariation(parentExerciseId) > 0) {
+            return ExerciseSaveOutcome.ParentIsAlreadyVariation(parent.name)
+        }
+        if (countVariationsForParent(variationExerciseId) > 0) {
+            val self = getById(variationExerciseId)
+            return ExerciseSaveOutcome.ExerciseHasOwnVariations(self?.name ?: "This exercise")
+        }
+        if (getVariationLink(variationExerciseId) != null) {
+            return ExerciseSaveOutcome.AlreadyLinkedElsewhere
+        }
+        insertVariationLink(
+            ExerciseVariationCrossRef(
+                variationExerciseId = variationExerciseId,
+                parentExerciseId = parentExerciseId,
+                focus = focus.trim()
+            )
+        )
+        return ExerciseSaveOutcome.Success(variationExerciseId)
+    }
+
+    /**
+     * Checks whether [mutation] is valid without writing anything, so callers can validate
+     * before any destructive mutation. Returns null when valid, or the specific
+     * [ExerciseSaveOutcome] failure otherwise. [existingExerciseId] is null when saving a
+     * brand-new exercise (which can never self-link or already have variations of its own).
+     */
+    private suspend fun validateFamilyMutation(
+        existingExerciseId: Long?,
+        mutation: ExerciseFamilyMutation
+    ): ExerciseSaveOutcome? {
+        if (mutation !is ExerciseFamilyMutation.LinkTo) return null
+        if (existingExerciseId != null && mutation.parentExerciseId == existingExerciseId) {
+            return ExerciseSaveOutcome.SelfLink
+        }
+        val parent = getById(mutation.parentExerciseId)
+            ?: return ExerciseSaveOutcome.ParentNotFound(mutation.parentExerciseId)
+        if (countLinksAsVariation(mutation.parentExerciseId) > 0) {
+            return ExerciseSaveOutcome.ParentIsAlreadyVariation(parent.name)
+        }
+        if (existingExerciseId != null && countVariationsForParent(existingExerciseId) > 0) {
+            val self = getById(existingExerciseId)
+            return ExerciseSaveOutcome.ExerciseHasOwnVariations(self?.name ?: "This exercise")
+        }
+        return null
+    }
+
+    /** Applies an already-validated [mutation]; never call without [validateFamilyMutation] first. */
+    private suspend fun applyFamilyMutation(exerciseId: Long, mutation: ExerciseFamilyMutation) {
+        when (mutation) {
+            is ExerciseFamilyMutation.NoChange -> Unit
+            is ExerciseFamilyMutation.Detach -> deleteVariationLink(exerciseId)
+            is ExerciseFamilyMutation.LinkTo -> {
+                // Detach any existing link first so reparenting is a single atomic replace, not
+                // a separate unlink-then-relink that could leave the exercise detached if the
+                // second step failed.
+                deleteVariationLink(exerciseId)
+                insertVariationLink(
+                    ExerciseVariationCrossRef(
+                        variationExerciseId = exerciseId,
+                        parentExerciseId = mutation.parentExerciseId,
+                        focus = mutation.focus.trim()
+                    )
+                )
+            }
+        }
     }
 
     private suspend fun replaceRelations(

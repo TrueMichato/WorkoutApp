@@ -78,8 +78,13 @@ class ExercisesViewModel @Inject constructor(
                     archived
                 }
             }
+            // Family grouping is a presentation-only concern: attach each visible exercise's
+            // "N variations" / "Variation of X" badge without changing the underlying search or
+            // filter query results, so variations remain independently findable by name.
+            val familyBadges = buildFamilyBadges(visibleExercises)
             ExercisesUiState(
                 exercises = visibleExercises,
+                familyBadges = familyBadges,
                 searchQuery = args.query,
                 selectedCategory = args.category,
                 libraryFilter = args.libraryFilter,
@@ -95,6 +100,32 @@ class ExercisesViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = ExercisesUiState(isLoading = true)
     )
+
+    private suspend fun buildFamilyBadges(visibleExercises: List<Exercise>): Map<Long, ExerciseFamilyBadge> {
+        if (visibleExercises.isEmpty()) return emptyMap()
+        val variationParentIds = exerciseRepository.getFamilyRootIdsForAll()
+        // Resolve parent/variation names from every exercise (including archived and any
+        // filtered-out by the current search/category), not just the currently visible list -
+        // otherwise a variation whose parent is excluded from the visible set (archived, outside
+        // the active search/category filter, etc.) would show a bare "Variation" badge instead
+        // of "Variation of X".
+        val allExerciseNamesById = exerciseRepository.getAllExerciseNamesById()
+        val badges = mutableMapOf<Long, ExerciseFamilyBadge>()
+        val variationCountByParent = variationParentIds.values.groupingBy { it }.eachCount()
+        visibleExercises.forEach { exercise ->
+            val parentId = variationParentIds[exercise.id]
+            if (parentId != null) {
+                val parentName = allExerciseNamesById[parentId]
+                badges[exercise.id] = ExerciseFamilyBadge.Variation(parentName = parentName)
+            } else {
+                val count = variationCountByParent[exercise.id] ?: 0
+                if (count > 0) {
+                    badges[exercise.id] = ExerciseFamilyBadge.MainExercise(variationCount = count)
+                }
+            }
+        }
+        return badges
+    }
 
     fun onSearchQueryChange(query: String) {
         _searchQuery.value = query
@@ -176,6 +207,7 @@ enum class ExerciseLibraryFilter(val displayName: String) {
 
 data class ExercisesUiState(
     val exercises: List<Exercise> = emptyList(),
+    val familyBadges: Map<Long, ExerciseFamilyBadge> = emptyMap(),
     val searchQuery: String = "",
     val selectedCategory: WorkoutCategory? = null,
     val libraryFilter: ExerciseLibraryFilter = ExerciseLibraryFilter.ACTIVE,
@@ -186,6 +218,12 @@ data class ExercisesUiState(
     val templateSaveMessage: String? = null,
     val error: String? = null
 )
+
+/** Presentation-only exercise family badge for a library card; never affects search/filter results. */
+sealed class ExerciseFamilyBadge {
+    data class MainExercise(val variationCount: Int) : ExerciseFamilyBadge()
+    data class Variation(val parentName: String?) : ExerciseFamilyBadge()
+}
 
 private fun Exercise.matchesQuery(query: String): Boolean {
     val normalizedQuery = query.trim()

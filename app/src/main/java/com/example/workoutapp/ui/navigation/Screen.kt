@@ -63,6 +63,14 @@ sealed class Screen(
         title = "Add Exercise"
     )
 
+    /** Pre-fills a brand-new exercise as a variation of [parentExerciseId] (see AddEditExerciseViewModel.loadNewVariation). */
+    data object AddVariation : Screen(
+        route = "exercise/add/variation/{parentExerciseId}",
+        title = "Add Variation"
+    ) {
+        fun createRoute(parentExerciseId: Long) = "exercise/add/variation/$parentExerciseId"
+    }
+
     data object EditExercise : Screen(
         route = "exercise/edit/{exerciseId}",
         title = "Edit Exercise"

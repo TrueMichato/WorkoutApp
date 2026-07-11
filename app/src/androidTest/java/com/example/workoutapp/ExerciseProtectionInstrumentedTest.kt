@@ -1,5 +1,6 @@
 package com.example.workoutapp
 
+import androidx.core.net.toUri
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.workoutapp.data.local.WorkoutDatabase
 import androidx.test.platform.app.InstrumentationRegistry
@@ -17,6 +18,7 @@ import com.example.workoutapp.data.model.WorkoutCategory
 import com.example.workoutapp.data.model.WorkoutPlanTemplate
 import com.example.workoutapp.data.model.WorkoutPlanTemplateExercise
 import com.example.workoutapp.data.model.WorkoutSession
+import com.example.workoutapp.data.model.persistedJson
 import com.example.workoutapp.data.repository.EquipmentRepository
 import com.example.workoutapp.data.repository.ExerciseRepository
 import com.example.workoutapp.data.repository.SessionExerciseConfig
@@ -31,6 +33,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.encodeToString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -177,6 +180,40 @@ class ExerciseProtectionInstrumentedTest {
     }
 
     @Test
+    fun exercisesLibrary_variationBadgeShowsParentName_evenWhenParentIsFilteredOut() = runBlocking {
+        val mainId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Filtered Out Main Exercise"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        val variationId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Searchable Unique Variation Name"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        exerciseRepository.linkVariation(mainId, variationId, "Some focus")
+        val viewModel = ExercisesViewModel(exerciseRepository, exerciseCsvImporter, exerciseCsvTemplateExporter)
+
+        // Search for a query that matches only the variation's name, not the main exercise's -
+        // the main exercise is excluded from the visible result set entirely.
+        viewModel.onSearchQueryChange("Searchable Unique Variation")
+
+        val state = viewModel.uiState.first {
+            !it.isLoading && it.exercises.any { exercise -> exercise.id == variationId }
+        }
+
+        assertFalse(state.exercises.any { it.id == mainId })
+        val badge = state.familyBadges[variationId]
+        assertTrue(badge is com.example.workoutapp.ui.exercises.ExerciseFamilyBadge.Variation)
+        assertEquals(
+            "Filtered Out Main Exercise",
+            (badge as com.example.workoutapp.ui.exercises.ExerciseFamilyBadge.Variation).parentName
+        )
+    }
+
+    @Test
     fun archivePreservesHistoryPlanAndPtReferences_andHardDeleteIsGuarded() = runBlocking {
         val exerciseId = exerciseRepository.createExerciseWithRelations(
             exercise = Exercise(name = "Referenced exercise row"),
@@ -246,6 +283,199 @@ class ExerciseProtectionInstrumentedTest {
 
         assertNull(exerciseRepository.getExerciseById(exerciseId))
         assertFalse(exerciseRepository.getAllExercisesIncludingArchived().first().any { it.id == exerciseId })
+    }
+
+    @Test
+    fun hardDelete_isGuardedWhileFamilyLinked_untilExplicitlyDetached() = runBlocking {
+        val mainId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Push-up"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        val variationId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Tiger Push-up"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        exerciseRepository.linkVariation(mainId, variationId, "Triceps emphasis")
+
+        // Neither side of the link can be hard-deleted while linked.
+        assertTrue(runCatching { exerciseRepository.hardDeleteExerciseIfUnreferenced(mainId) }.isFailure)
+        assertTrue(runCatching { exerciseRepository.hardDeleteExerciseIfUnreferenced(variationId) }.isFailure)
+        assertNotNull(exerciseRepository.getExerciseById(mainId))
+        assertNotNull(exerciseRepository.getExerciseById(variationId))
+
+        exerciseRepository.unlinkVariation(variationId)
+
+        // Once detached, both are ordinary unreferenced standalone exercises again.
+        exerciseRepository.hardDeleteExerciseIfUnreferenced(variationId)
+        exerciseRepository.hardDeleteExerciseIfUnreferenced(mainId)
+        assertNull(exerciseRepository.getExerciseById(variationId))
+        assertNull(exerciseRepository.getExerciseById(mainId))
+    }
+
+    @Test
+    fun linkVariation_rejectsSelfLinkCycleAndDuplicateParent() = runBlocking {
+        val pushUpId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Push-up"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        val tigerId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Tiger Push-up"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        val pikeId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Pike Push-up"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+
+        // No self-link.
+        assertTrue(runCatching { exerciseRepository.linkVariation(pushUpId, pushUpId, "") }.isFailure)
+
+        exerciseRepository.linkVariation(pushUpId, tigerId, "Triceps emphasis")
+
+        // No multi-level nesting: a variation can't also become a main exercise.
+        assertTrue(runCatching { exerciseRepository.linkVariation(tigerId, pikeId, "") }.isFailure)
+        // No multi-level nesting: a main exercise can't also become a variation.
+        assertTrue(runCatching { exerciseRepository.linkVariation(pikeId, pushUpId, "") }.isFailure)
+        // No duplicate parentage without detaching first.
+        assertTrue(runCatching { exerciseRepository.linkVariation(pikeId, tigerId, "") }.isFailure)
+
+        assertEquals(pushUpId, exerciseRepository.getParentExerciseId(tigerId))
+    }
+
+    @Test
+    fun getFamily_resolvesRootAndListsAllVariationsWithFocus() = runBlocking {
+        val pushUpId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Push-up"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        val tigerId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Tiger Push-up"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        val pikeId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Pike Push-up"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        exerciseRepository.linkVariation(pushUpId, tigerId, "Triceps emphasis")
+        exerciseRepository.linkVariation(pushUpId, pikeId, "Shoulder emphasis")
+
+        val familyFromRoot = exerciseRepository.getFamily(pushUpId)
+        assertNotNull(familyFromRoot)
+        requireNotNull(familyFromRoot)
+        assertEquals(pushUpId, familyFromRoot.root.id)
+        assertEquals(2, familyFromRoot.variations.size)
+        assertEquals("Triceps emphasis", familyFromRoot.variations.single { it.exercise.id == tigerId }.focus)
+
+        val familyFromVariation = exerciseRepository.getFamily(tigerId)
+        assertNotNull(familyFromVariation)
+        requireNotNull(familyFromVariation)
+        assertEquals(pushUpId, familyFromVariation.root.id)
+
+        assertNull(exerciseRepository.getFamily(pikeId + 1_000_000L))
+    }
+
+    @Test
+    fun saveExercise_forcedFamilyFailure_leavesRowRelationsAndMediaCompletelyUntouched() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val mediaStorageManager = MediaStorageManager(context)
+
+        // A pre-existing exercise that will act as the (invalid) parent target: it is itself
+        // already a variation, so linking to it must be rejected.
+        val grandparentId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Grandparent Exercise"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        val invalidParentId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Already A Variation"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        exerciseRepository.linkVariation(grandparentId, invalidParentId, "")
+
+        // The exercise under edit already has its own, pre-existing, already-persisted media
+        // file - this must never be touched by a failed save.
+        val preExistingSourceFile = java.io.File(context.cacheDir, "pre-existing-media.txt").apply {
+            writeText("pre-existing media")
+        }
+        val preExistingOwnedUri = mediaStorageManager.copyIntoExerciseMedia(listOf(preExistingSourceFile.toUri())).single()
+        val originalName = "Exercise Under Edit"
+        val originalDescription = "original description"
+        val originalLocalMediaJson = persistedJson.encodeToString(
+            listOf(preExistingOwnedUri.toString())
+        )
+        val exerciseId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(
+                name = originalName,
+                description = originalDescription,
+                localMediaUris = originalLocalMediaJson
+            ),
+            categories = listOf(WorkoutCategory.MOBILITY),
+            equipmentIds = emptyList(),
+            primaryMuscles = listOf(MuscleGroup.CHEST)
+        )
+
+        val viewModel = AddEditExerciseViewModel(exerciseRepository, equipmentRepository, mediaStorageManager)
+        viewModel.loadExercise(exerciseId)
+        waitUntil { !viewModel.uiState.value.isLoading && viewModel.uiState.value.name == originalName }
+
+        // Add a brand-new, not-yet-committed media file to this edit - since the whole save will
+        // be rejected, the copy this triggers must be cleaned up rather than orphaned.
+        val newSourceFile = java.io.File(context.cacheDir, "new-media-attempt.txt").apply {
+            writeText("new media attempt")
+        }
+        viewModel.addLocalMedia(listOf(newSourceFile.toUri()))
+        viewModel.updateName("Renamed During Failed Save")
+        viewModel.updateDescription("this description should never persist")
+        viewModel.onFamilyParentSelected(exerciseRepository.getExerciseById(invalidParentId))
+        viewModel.onFamilyFocusChanged("attempted focus")
+
+        viewModel.saveExercise()
+        waitUntil { !viewModel.uiState.value.isSaving }
+
+        assertFalse(viewModel.uiState.value.saveSuccess)
+        assertNotNull(viewModel.uiState.value.familyError)
+
+        // The exercise row itself was not renamed/edited - the whole transaction rolled back.
+        val reloaded = exerciseRepository.getExerciseById(exerciseId)
+        assertNotNull(reloaded)
+        requireNotNull(reloaded)
+        assertEquals(originalName, reloaded.name)
+        assertEquals(originalDescription, reloaded.description)
+        assertEquals(originalLocalMediaJson, reloaded.localMediaUris)
+        // Its relations were not replaced either.
+        assertEquals(listOf(WorkoutCategory.MOBILITY), exerciseRepository.getExerciseCategories(exerciseId))
+        // It never became a variation of anything.
+        assertNull(exerciseRepository.getParentExerciseId(exerciseId))
+
+        // The pre-existing, still-referenced media file is untouched.
+        assertTrue(java.io.File(requireNotNull(preExistingOwnedUri.path)).exists())
+        // The newly-copied media from this failed attempt was cleaned up, not left orphaned.
+        val ownedMediaDir = java.io.File(requireNotNull(preExistingOwnedUri.path)).parentFile
+        val remainingFiles = ownedMediaDir?.listFiles()?.map { it.name } ?: emptyList()
+        assertTrue(remainingFiles.none { it.contains("new-media-attempt") })
+
+        preExistingSourceFile.delete()
+        newSourceFile.delete()
+        mediaStorageManager.deleteOwnedMediaFiles(listOf(preExistingOwnedUri))
     }
 
     private suspend fun waitUntil(predicate: () -> Boolean) {

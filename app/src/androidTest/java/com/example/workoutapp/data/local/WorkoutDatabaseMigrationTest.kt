@@ -74,6 +74,56 @@ class WorkoutDatabaseMigrationTest {
         assertEquals("COMPLETED", db.stringForQuery("SELECT action FROM ml_feedback_events WHERE id = 100"))
         assertEquals(4L, db.longForQuery("SELECT sampleCount FROM ml_preference_scores WHERE `key` = 'exercise:100'"))
 
+        // v6 adds the exercise_variations table; a v5 baseline has no family links, so every
+        // migrated exercise (including the representative "User Exercise" above) stays standalone.
+        assertEquals(0L, db.longForQuery("SELECT COUNT(*) FROM exercise_variations"))
+        assertEquals(0L, db.longForQuery("SELECT COUNT(*) FROM exercise_variations WHERE variationExerciseId = 100 OR parentExerciseId = 100"))
+
+        db.close()
+    }
+
+    @Test
+    fun migrationV5ToV6CreatesExerciseVariationsTableAndSupportsFamilyLinks() {
+        helper.createDatabase(TEST_DB, WorkoutDatabaseMigrations.FIRST_SHIPPED_VERSION).apply {
+            insertRepresentativeUserData()
+            // A second standalone exercise to link as a variation of the first one.
+            execSQL(
+                """
+                INSERT INTO exercises (
+                    id, name, description, instructions, tips, difficulty, isUnilateral, isCompound,
+                    defaultSets, defaultReps, defaultRestSeconds, estimatedDurationSeconds,
+                    trainingPhasePresets, localMediaUris, externalMediaUrls, timesPerformed,
+                    lastPerformedAt, isFavorite, isArchived, personalNotes, createdAt, updatedAt
+                ) VALUES (
+                    101, 'User Exercise Variation', 'desc', 'inst', 'tips', 'ADVANCED', 1, 0,
+                    4, '6-8', 120, 240, '{}', '[]', '[]', 0,
+                    NULL, 0, 0, '', 1000, 1001
+                )
+                """.trimIndent()
+            )
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(
+            TEST_DB,
+            WorkoutDatabaseMigrations.CURRENT_VERSION,
+            true,
+            *WorkoutDatabaseMigrations.ALL
+        )
+
+        assertEquals(0L, db.longForQuery("SELECT COUNT(*) FROM exercise_variations"))
+
+        // The new table accepts family links after migration, and both linked exercises' own
+        // rows/relations are untouched by the link itself.
+        db.execSQL(
+            "INSERT INTO exercise_variations (variationExerciseId, parentExerciseId, focus) VALUES (101, 100, 'Triceps emphasis')"
+        )
+        assertEquals(1L, db.longForQuery("SELECT COUNT(*) FROM exercise_variations WHERE parentExerciseId = 100"))
+        assertEquals("Triceps emphasis", db.stringForQuery("SELECT focus FROM exercise_variations WHERE variationExerciseId = 101"))
+        assertEquals("User Exercise", db.stringForQuery("SELECT name FROM exercises WHERE id = 100"))
+        assertEquals("User Exercise Variation", db.stringForQuery("SELECT name FROM exercises WHERE id = 101"))
+        assertEquals(1L, db.longForQuery("SELECT COUNT(*) FROM exercise_categories WHERE exerciseId = 100"))
+
         db.close()
     }
 
@@ -89,7 +139,10 @@ class WorkoutDatabaseMigrationTest {
             database.openHelper.writableDatabase
             fail("Opening an unsupported pre-v5 database should require an explicit migration.")
         } catch (expected: IllegalStateException) {
-            assertTrue(expected.message.orEmpty().contains("A migration from 4 to 5 was required"))
+            assertTrue(
+                expected.message.orEmpty()
+                    .contains("A migration from 4 to ${WorkoutDatabaseMigrations.CURRENT_VERSION} was required")
+            )
         } finally {
             database.close()
         }

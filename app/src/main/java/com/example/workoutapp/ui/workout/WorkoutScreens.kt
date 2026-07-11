@@ -59,6 +59,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -634,6 +635,41 @@ private fun LazyListScope.generatorAdvancedSetupSection(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+
+    item {
+        OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Limit to one variation per exercise family",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        if (uiState.familyDedupEnabled) {
+                            "On: generated workouts and swaps use at most one variation from each exercise family (e.g. only one push-up variant)."
+                        } else {
+                            "Off: multiple variations from the same family may appear together in a generated workout."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Switch(
+                    checked = uiState.familyDedupEnabled,
+                    onCheckedChange = viewModel::setFamilyDedupEnabled,
+                    modifier = Modifier.testTag(TestTags.WorkoutGenerator.FamilyDedupToggle)
+                )
+            }
+        }
     }
 
     item {

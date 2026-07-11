@@ -46,4 +46,26 @@ class UserPreferencesDataStoreTest {
         store.markProfileCustomized()
         assertTrue(store.hasCustomizedProfile.first())
     }
+
+    @Test
+    fun generatorFamilyDedupEnabled_defaultsTrue_onFreshDataStore() = runBlocking {
+        // Product decision: family de-dup defaults ON so first-run users and installs that never
+        // touched this setting get the safer, deduplicated generator behavior.
+        assertTrue(newStore().generatorFamilyDedupEnabled.first())
+    }
+
+    @Test
+    fun setGeneratorFamilyDedupEnabled_persistsFalse() = runBlocking {
+        val store = newStore()
+        store.setGeneratorFamilyDedupEnabled(false)
+        assertFalse(store.generatorFamilyDedupEnabled.first())
+    }
+
+    @Test
+    fun setGeneratorFamilyDedupEnabled_roundTripsBackToTrue() = runBlocking {
+        val store = newStore()
+        store.setGeneratorFamilyDedupEnabled(false)
+        store.setGeneratorFamilyDedupEnabled(true)
+        assertTrue(store.generatorFamilyDedupEnabled.first())
+    }
 }
