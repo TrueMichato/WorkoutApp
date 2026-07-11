@@ -107,7 +107,8 @@ fun AddEditExerciseScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(16.dp)
+                .testTag(TestTags.AddEditExercise.ContentList),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Name

@@ -1,6 +1,8 @@
 package com.example.workoutapp
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -9,6 +11,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import com.example.workoutapp.data.local.WorkoutDatabase
 import com.example.workoutapp.data.model.Difficulty
@@ -139,6 +142,8 @@ class ExerciseLibraryFlowTest {
 
         composeRule.onNodeWithTag(TestTags.AddEditExercise.Screen).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.AddEditExercise.NameField).performTextInput(variationName)
+        composeRule.onNodeWithTag(TestTags.AddEditExercise.ContentList)
+            .performScrollToNode(hasTestTag(TestTags.AddEditExercise.FamilyParentPickerButton))
         composeRule.onNodeWithTag(TestTags.AddEditExercise.FamilyParentPickerButton).performClick()
 
         composeRule.waitUntil(timeoutMillis = 10_000) {
@@ -153,7 +158,12 @@ class ExerciseLibraryFlowTest {
             composeRule.onAllNodesWithText(variationName).fetchSemanticsNodes().isNotEmpty()
         }
 
-        // Library shows the "Variation of" badge on the new exercise's card.
+        // Library shows the "Variation of" badge on the new exercise's card - this depends on a
+        // second, separate async computation (ExercisesViewModel.buildFamilyBadges) that can
+        // lag slightly behind the exercise list itself appearing, so wait for it explicitly.
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Variation of $mainName").fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText("Variation of $mainName").assertIsDisplayed()
 
         // Detail screen for the variation links back to the main exercise.
@@ -204,6 +214,8 @@ class ExerciseLibraryFlowTest {
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Variation of \"$mainName\"", substring = true).fetchSemanticsNodes().isNotEmpty()
         }
+        composeRule.onNodeWithTag(TestTags.AddEditExercise.ContentList)
+            .performScrollToNode(hasText("Variation of \"$mainName\"", substring = true))
         composeRule.onNodeWithText("Variation of \"$mainName\"", substring = true).assertIsDisplayed()
 
         composeRule.onNodeWithTag(TestTags.AddEditExercise.NameField).performTextInput(newVariationName)
@@ -213,7 +225,10 @@ class ExerciseLibraryFlowTest {
         composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText(newVariationName).fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Variation of $mainName").assertIsDisplayed()
+        // Saving pops back to the main exercise's own detail screen (the screen "Create
+        // variation" was launched from), which now lists the new variation.
+        composeRule.onNodeWithText("Variations").assertIsDisplayed()
+        composeRule.onNodeWithText(newVariationName).assertIsDisplayed()
 
         runBlocking {
             val savedId = exerciseRepository.getAllExercises().first().single { it.name == newVariationName }.id

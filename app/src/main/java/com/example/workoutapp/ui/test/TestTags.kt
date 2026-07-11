@@ -41,6 +41,7 @@ object TestTags {
 
     object AddEditExercise {
         const val Screen = "add_edit_exercise_screen"
+        const val ContentList = "add_edit_exercise_content"
         const val NameField = "add_edit_exercise_name"
         const val DescriptionField = "add_edit_exercise_description"
         const val InstructionsField = "add_edit_exercise_instructions"
