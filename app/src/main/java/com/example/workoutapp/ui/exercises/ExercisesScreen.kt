@@ -16,9 +16,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.workoutapp.data.csv.ExerciseCsvSchema
+import com.example.workoutapp.data.csv.ExerciseCsvTemplate
 import com.example.workoutapp.data.model.Exercise
 import com.example.workoutapp.data.model.WorkoutCategory
 import com.example.workoutapp.ui.test.TestTags
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -29,14 +32,31 @@ fun ExercisesScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showFilterSheet by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
     val csvPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let(viewModel::importCsv)
     }
+    val templateSaveLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri ->
+        uri?.let(viewModel::saveTemplate)
+    }
+
+    LaunchedEffect(uiState.templateSaveMessage) {
+        uiState.templateSaveMessage?.let { message ->
+            coroutineScope.launch {
+                snackbarHostState.showSnackbar(message)
+                viewModel.clearTemplateSaveMessage()
+            }
+        }
+    }
 
     Scaffold(
         modifier = Modifier.testTag(TestTags.Exercises.Screen),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Exercise Library") },
@@ -51,6 +71,12 @@ fun ExercisesScreen(
                         } else {
                             Icon(Icons.Default.UploadFile, "Import CSV")
                         }
+                    }
+                    IconButton(
+                        onClick = { templateSaveLauncher.launch(ExerciseCsvTemplate.suggestedFileName) },
+                        modifier = Modifier.testTag(TestTags.Exercises.SaveTemplateButton)
+                    ) {
+                        Icon(Icons.Default.Download, "Save CSV template")
                     }
                     IconButton(
                         onClick = { showFilterSheet = true },
@@ -162,7 +188,7 @@ fun ExercisesScreen(
                             }
                         }
                         Text(
-                            "CSV columns supported: name, categories, equipment, difficulty, default_sets, default_reps, default_rest_seconds, plus optional phase columns like hypertrophy_focus_sets / reps / rest / notes.",
+                            ExerciseCsvSchema.helpSummary(),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )

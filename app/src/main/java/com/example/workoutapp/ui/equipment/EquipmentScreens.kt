@@ -51,11 +51,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.workoutapp.data.model.Equipment
+import com.example.workoutapp.ui.test.TestTags
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,11 +67,33 @@ fun EquipmentManagementScreen(
     viewModel: EquipmentViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val addEquipmentState by viewModel.addEquipmentState.collectAsStateWithLifecycle()
+    val createLocationState by viewModel.createLocationState.collectAsStateWithLifecycle()
     var selectedTab by remember { mutableIntStateOf(0) }
     var showAddLocationDialog by remember { mutableStateOf(false) }
     var showAddEquipmentDialog by remember { mutableStateOf(false) }
 
+    // Close the dialog and select the new item only once persistence is confirmed by the
+    // repository (createdEquipmentId is set after a successful DB write, never optimistically).
+    LaunchedEffect(addEquipmentState.createdEquipmentId) {
+        if (addEquipmentState.createdEquipmentId != null) {
+            showAddEquipmentDialog = false
+            viewModel.consumeCreatedEquipmentSignal()
+            viewModel.resetAddEquipmentState()
+        }
+    }
+
+    // Same confirmed-persistence-only close behavior for locations.
+    LaunchedEffect(createLocationState.createdLocationId) {
+        if (createLocationState.createdLocationId != null) {
+            showAddLocationDialog = false
+            viewModel.consumeCreatedLocationSignal()
+            viewModel.resetCreateLocationState()
+        }
+    }
+
     Scaffold(
+        modifier = Modifier.testTag(TestTags.Equipment.Screen),
         topBar = {
             TopAppBar(
                 title = { Text("Equipment & Locations") },
@@ -110,7 +134,8 @@ fun EquipmentManagementScreen(
                 1 -> EquipmentTab(
                     uiState = uiState,
                     onAddEquipment = { showAddEquipmentDialog = true },
-                    onDeleteCustomEquipment = viewModel::deleteCustomEquipment
+                    onDeleteCustomEquipment = viewModel::deleteCustomEquipment,
+                    onDismissActionError = viewModel::clearEquipmentActionError
                 )
             }
         }
@@ -118,21 +143,29 @@ fun EquipmentManagementScreen(
 
     if (showAddLocationDialog) {
         CreateLocationDialog(
+            isSaving = createLocationState.isSaving,
+            errorMessage = createLocationState.error,
             onConfirm = { name, description, setDefault ->
                 viewModel.createLocation(name, description, setDefault)
-                showAddLocationDialog = false
             },
-            onDismiss = { showAddLocationDialog = false }
+            onDismiss = {
+                showAddLocationDialog = false
+                viewModel.resetCreateLocationState()
+            }
         )
     }
 
     if (showAddEquipmentDialog) {
         CreateEquipmentDialog(
+            isSaving = addEquipmentState.isSaving,
+            errorMessage = addEquipmentState.error,
             onConfirm = { name, description, portable ->
                 viewModel.createEquipment(name, description, portable)
-                showAddEquipmentDialog = false
             },
-            onDismiss = { showAddEquipmentDialog = false }
+            onDismiss = {
+                showAddEquipmentDialog = false
+                viewModel.resetAddEquipmentState()
+            }
         )
     }
 }
@@ -221,8 +254,21 @@ private fun LocationsTab(
 private fun EquipmentTab(
     uiState: EquipmentManagementUiState,
     onAddEquipment: () -> Unit,
-    onDeleteCustomEquipment: (Equipment) -> Unit
+    onDeleteCustomEquipment: (Equipment) -> Unit,
+    onDismissActionError: () -> Unit
 ) {
+    val actionError = uiState.equipmentActionError
+    if (actionError != null) {
+        AlertDialog(
+            onDismissRequest = onDismissActionError,
+            title = { Text("Can't remove equipment") },
+            text = { Text(actionError) },
+            confirmButton = {
+                TextButton(onClick = onDismissActionError) { Text("OK") }
+            }
+        )
+    }
+
     LazyColumn(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -238,7 +284,7 @@ private fun EquipmentTab(
         item {
             OutlinedButton(
                 onClick = onAddEquipment,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth().testTag(TestTags.Equipment.AddButton)
             ) {
                 Icon(Icons.Default.Add, null)
                 Spacer(modifier = Modifier.width(8.dp))
@@ -246,18 +292,24 @@ private fun EquipmentTab(
             }
         }
 
+        // Each equipment row is rendered exactly once: uiState.customEquipment and
+        // uiState.builtInEquipment are disjoint partitions of uiState.allEquipment, so no id ever
+        // appears in both LazyColumn item groups below (that duplication used to crash Compose
+        // with a duplicate-key error the first time a custom item was added).
         if (uiState.customEquipment.isNotEmpty()) {
             item {
                 Text("Custom Equipment", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             }
             items(uiState.customEquipment, key = { it.id }) { equipment ->
                 ListItem(
+                    modifier = Modifier.testTag(TestTags.Equipment.row(equipment.id)),
                     headlineContent = { Text(equipment.name) },
                     supportingContent = {
                         Text(
                             buildList {
                                 if (equipment.description.isNotBlank()) add(equipment.description)
                                 if (equipment.isPortable) add("Portable")
+                                add("Custom")
                             }.joinToString(" • ")
                         )
                     },
@@ -272,17 +324,17 @@ private fun EquipmentTab(
         }
 
         item {
-            Text("All Equipment", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text("Built-in Equipment", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
         }
-        items(uiState.allEquipment, key = { it.id }) { equipment ->
+        items(uiState.builtInEquipment, key = { it.id }) { equipment ->
             ListItem(
+                modifier = Modifier.testTag(TestTags.Equipment.row(equipment.id)),
                 headlineContent = { Text(equipment.name) },
                 supportingContent = {
                     Text(
                         buildList {
                             if (equipment.description.isNotBlank()) add(equipment.description)
                             if (equipment.isPortable) add("Portable")
-                            if (equipment.isCustom) add("Custom")
                         }.joinToString(" • ")
                     )
                 },
@@ -468,6 +520,8 @@ fun LocationDetailScreen(
 
 @Composable
 private fun CreateLocationDialog(
+    isSaving: Boolean,
+    errorMessage: String?,
     onConfirm: (String, String, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -485,7 +539,9 @@ private fun CreateLocationDialog(
                     onValueChange = { name = it },
                     label = { Text("Name") },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    singleLine = true,
+                    enabled = !isSaving,
+                    isError = errorMessage != null
                 )
                 OutlinedTextField(
                     value = description,
@@ -493,27 +549,41 @@ private fun CreateLocationDialog(
                     label = { Text("Description") },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
-                    maxLines = 3
+                    maxLines = 3,
+                    enabled = !isSaving
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = setDefault, onCheckedChange = { setDefault = it })
+                    Checkbox(checked = setDefault, onCheckedChange = { setDefault = it }, enabled = !isSaving)
                     Text("Use as default")
+                }
+                if (errorMessage != null) {
+                    Text(
+                        errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(name, description, setDefault) }, enabled = name.isNotBlank()) {
-                Text("Create")
+            TextButton(onClick = { onConfirm(name, description, setDefault) }, enabled = name.isNotBlank() && !isSaving) {
+                if (isSaving) {
+                    CircularProgressIndicator(modifier = Modifier.width(16.dp).height(16.dp), strokeWidth = 2.dp)
+                } else {
+                    Text("Create")
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss, enabled = !isSaving) { Text("Cancel") }
         }
     )
 }
 
 @Composable
 private fun CreateEquipmentDialog(
+    isSaving: Boolean,
+    errorMessage: String?,
     onConfirm: (String, String, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -530,8 +600,10 @@ private fun CreateEquipmentDialog(
                     value = name,
                     onValueChange = { name = it },
                     label = { Text("Name") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    modifier = Modifier.fillMaxWidth().testTag(TestTags.Equipment.NameField),
+                    singleLine = true,
+                    enabled = !isSaving,
+                    isError = errorMessage != null
                 )
                 OutlinedTextField(
                     value = description,
@@ -539,21 +611,38 @@ private fun CreateEquipmentDialog(
                     label = { Text("Description") },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
-                    maxLines = 3
+                    maxLines = 3,
+                    enabled = !isSaving
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = portable, onCheckedChange = { portable = it })
+                    Checkbox(checked = portable, onCheckedChange = { portable = it }, enabled = !isSaving)
                     Text("Portable / travel-friendly")
+                }
+                if (errorMessage != null) {
+                    Text(
+                        errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.testTag(TestTags.Equipment.ErrorText)
+                    )
                 }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(name, description, portable) }, enabled = name.isNotBlank()) {
-                Text("Create")
+            TextButton(
+                onClick = { onConfirm(name, description, portable) },
+                enabled = name.isNotBlank() && !isSaving,
+                modifier = Modifier.testTag(TestTags.Equipment.CreateButton)
+            ) {
+                if (isSaving) {
+                    CircularProgressIndicator(modifier = Modifier.width(16.dp).height(16.dp), strokeWidth = 2.dp)
+                } else {
+                    Text("Create")
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss, enabled = !isSaving) { Text("Cancel") }
         }
     )
 }

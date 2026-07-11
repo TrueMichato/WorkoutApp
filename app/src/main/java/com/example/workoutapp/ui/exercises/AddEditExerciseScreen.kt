@@ -752,9 +752,16 @@ fun AddEditExerciseScreen(
             EquipmentSelectionDialog(
                 allEquipment = uiState.allEquipment,
                 selectedEquipment = uiState.selectedEquipment,
+                isCreatingEquipment = uiState.isCreatingEquipment,
+                creationError = uiState.equipmentCreationError,
+                createdEquipmentId = uiState.createdCustomEquipmentId,
                 onEquipmentToggle = viewModel::toggleEquipment,
                 onCreateCustomEquipment = viewModel::createCustomEquipment,
-                onDismiss = { showEquipmentDialog = false }
+                onConsumeCreatedEquipment = viewModel::consumeCreatedCustomEquipmentSignal,
+                onDismiss = {
+                    showEquipmentDialog = false
+                    viewModel.clearEquipmentCreationError()
+                }
             )
         }
 
@@ -873,14 +880,29 @@ private fun ExternalUrlThumbnail(
 private fun EquipmentSelectionDialog(
     allEquipment: List<Equipment>,
     selectedEquipment: List<Equipment>,
+    isCreatingEquipment: Boolean,
+    creationError: String?,
+    createdEquipmentId: Long?,
     onEquipmentToggle: (Equipment) -> Unit,
     onCreateCustomEquipment: (String, String, Boolean) -> Unit,
+    onConsumeCreatedEquipment: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val selectedIds = selectedEquipment.map { it.id }.toSet()
     var customName by remember { mutableStateOf("") }
     var customDescription by remember { mutableStateOf("") }
     var customPortable by remember { mutableStateOf(false) }
+
+    // Only clear the custom-equipment form once the ViewModel confirms the row was actually
+    // persisted (createdEquipmentId is set after a successful DB write), never optimistically.
+    LaunchedEffect(createdEquipmentId) {
+        if (createdEquipmentId != null) {
+            customName = ""
+            customDescription = ""
+            customPortable = false
+            onConsumeCreatedEquipment()
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -932,7 +954,9 @@ private fun EquipmentSelectionDialog(
                     onValueChange = { customName = it },
                     label = { Text("Name") },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    singleLine = true,
+                    enabled = !isCreatingEquipment,
+                    isError = creationError != null
                 )
                 OutlinedTextField(
                     value = customDescription,
@@ -940,25 +964,32 @@ private fun EquipmentSelectionDialog(
                     label = { Text("Description") },
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 2,
-                    maxLines = 3
+                    maxLines = 3,
+                    enabled = !isCreatingEquipment
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = customPortable, onCheckedChange = { customPortable = it })
+                    Checkbox(checked = customPortable, onCheckedChange = { customPortable = it }, enabled = !isCreatingEquipment)
                     Text("Portable / travel-friendly")
                 }
+                if (creationError != null) {
+                    Text(
+                        creationError,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
                 Button(
-                    onClick = {
-                        onCreateCustomEquipment(customName, customDescription, customPortable)
-                        customName = ""
-                        customDescription = ""
-                        customPortable = false
-                    },
-                    enabled = customName.isNotBlank(),
+                    onClick = { onCreateCustomEquipment(customName, customDescription, customPortable) },
+                    enabled = customName.isNotBlank() && !isCreatingEquipment,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Icons.Default.Add, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Create & Select")
+                    if (isCreatingEquipment) {
+                        CircularProgressIndicator(modifier = Modifier.width(16.dp).height(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.Add, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Create & Select")
+                    }
                 }
             }
         },
