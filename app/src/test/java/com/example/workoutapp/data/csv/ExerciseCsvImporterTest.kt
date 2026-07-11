@@ -11,6 +11,7 @@ import com.example.workoutapp.data.model.WorkoutCategory
 import com.example.workoutapp.data.model.decodeStoredProgrammingPresets
 import com.example.workoutapp.data.repository.EquipmentRepository
 import com.example.workoutapp.data.repository.EquipmentSaveResult
+import com.example.workoutapp.data.repository.ExerciseFamilyLinkResult
 import com.example.workoutapp.data.repository.ExerciseRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -55,6 +56,7 @@ class ExerciseCsvImporterTest {
         coEvery { equipmentRepository.createEquipment(any(), any(), any()) } returns
             EquipmentSaveResult.Success(Equipment(id = 100L, name = "Kettlebell"))
         coEvery { equipmentRepository.getEquipmentById(100L) } returns Equipment(id = 100L, name = "Kettlebell")
+        coEvery { exerciseRepository.linkVariationResult(any(), any(), any()) } returns ExerciseFamilyLinkResult.Success
 
         importer = ExerciseCsvImporter(context, exerciseRepository, equipmentRepository)
     }
@@ -97,15 +99,15 @@ class ExerciseCsvImporterTest {
     }
 
     @Test
-    fun importFromUri_generatedTemplate_importsBothSampleRowsUnderTheSameSchema() = runTest {
+    fun importFromUri_generatedTemplate_importsAllSampleRowsUnderTheSameSchema() = runTest {
         stubCsvContent(ExerciseCsvTemplate.render())
 
         val result = importer.importFromUri(uri)
 
         assertEquals(emptyList<String>(), result.errors)
-        assertEquals(2, result.importedCount)
+        assertEquals(3, result.importedCount)
         assertEquals(0, result.skippedCount)
-        coVerify(exactly = 2) { exerciseRepository.createExerciseWithRelations(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 3) { exerciseRepository.createExerciseWithRelations(any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -129,7 +131,7 @@ class ExerciseCsvImporterTest {
         // The "Farmer's Walk" row uses "Functional,Strength" (quoted comma-delimited categories),
         // "Forearms;Grip" (semicolon-delimited primary muscles), and "Abs|Glutes" (pipe-delimited
         // secondary muscles) - proving quoting and all three multi-value delimiters round-trip.
-        assertEquals(2, categoriesSlots.size)
+        assertEquals(3, categoriesSlots.size)
         assertTrue(categoriesSlots.any { WorkoutCategory.FUNCTIONAL in it && WorkoutCategory.STRENGTH in it })
         assertTrue(primarySlots.any { MuscleGroup.FOREARMS in it && MuscleGroup.GRIP in it })
         assertTrue(secondarySlots.any { MuscleGroup.ABS in it && MuscleGroup.GLUTES in it })
@@ -161,5 +163,111 @@ class ExerciseCsvImporterTest {
 
         assertEquals(0, result.importedCount)
         assertEquals(1, result.skippedCount)
+    }
+
+    @Test
+    fun importFromUri_variationRowBeforeItsMainExerciseRow_resolvesRegardlessOfOrder() = runTest {
+        // "Diamond Push-Up" (a variation) appears BEFORE "Push-Up" (its main exercise) in the
+        // file - the two-pass import must still resolve the link correctly.
+        stubCsvContent(
+            """
+            name,categories,main_exercise,variation_focus
+            Diamond Push-Up,Strength,Push-Up,Triceps emphasis
+            Push-Up,Strength,,
+            """.trimIndent()
+        )
+        val linkedParentIds = mutableListOf<Long>()
+        val linkedVariationIds = mutableListOf<Long>()
+        val linkedFocuses = mutableListOf<String>()
+        coEvery {
+            exerciseRepository.linkVariationResult(capture(linkedParentIds), capture(linkedVariationIds), capture(linkedFocuses))
+        } returns ExerciseFamilyLinkResult.Success
+
+        val result = importer.importFromUri(uri)
+
+        assertEquals(2, result.importedCount)
+        assertEquals(emptyList<String>(), result.errors)
+        // Diamond Push-Up was created first (id 1), Push-Up second (id 2) - the link must
+        // still resolve to Push-Up's id as the parent, not fail just because it came later.
+        assertEquals(listOf(2L), linkedParentIds)
+        assertEquals(listOf(1L), linkedVariationIds)
+        assertEquals(listOf("Triceps emphasis"), linkedFocuses)
+    }
+
+    @Test
+    fun importFromUri_mainExerciseAlreadyExists_linksAgainstThePreExistingRow() = runTest {
+        every { exerciseRepository.getAllExercises() } returns
+            flowOf(listOf(Exercise(id = 500L, name = "Push-Up")))
+        stubCsvContent(
+            """
+            name,categories,main_exercise,variation_focus
+            Diamond Push-Up,Strength,Push-Up,Triceps emphasis
+            """.trimIndent()
+        )
+        coEvery { exerciseRepository.linkVariationResult(500L, any(), "Triceps emphasis") } returns
+            ExerciseFamilyLinkResult.Success
+
+        val result = importer.importFromUri(uri)
+
+        assertEquals(1, result.importedCount)
+        assertEquals(emptyList<String>(), result.errors)
+        coVerify(exactly = 1) { exerciseRepository.linkVariationResult(500L, any(), "Triceps emphasis") }
+    }
+
+    @Test
+    fun importFromUri_missingMainExercise_reportsRowErrorButKeepsTheExerciseImported() = runTest {
+        stubCsvContent(
+            """
+            name,categories,main_exercise,variation_focus
+            Orphaned Variation,Strength,Nonexistent Main Exercise,Some focus
+            """.trimIndent()
+        )
+
+        val result = importer.importFromUri(uri)
+
+        assertEquals(1, result.importedCount)
+        assertEquals(0, result.skippedCount)
+        assertTrue(result.errors.single().contains("Nonexistent Main Exercise"))
+        assertTrue(result.errors.single().contains("was not found"))
+        coVerify(exactly = 0) { exerciseRepository.linkVariationResult(any(), any(), any()) }
+    }
+
+    @Test
+    fun importFromUri_invalidFamilyLink_reportsRowErrorAndImportsExerciseStandalone() = runTest {
+        every { exerciseRepository.getAllExercises() } returns
+            flowOf(listOf(Exercise(id = 999L, name = "Some Main Exercise")))
+        stubCsvContent(
+            """
+            name,categories,main_exercise,variation_focus
+            Nested Variation,Strength,Some Main Exercise,Some focus
+            """.trimIndent()
+        )
+        coEvery { exerciseRepository.linkVariationResult(any(), any(), any()) } returns
+            ExerciseFamilyLinkResult.Failure(
+                com.example.workoutapp.data.repository.ExerciseFamilyLinkError.ParentIsAlreadyVariation("Some Main Exercise")
+            )
+
+        val result = importer.importFromUri(uri)
+
+        // The exercise itself is still imported - only the family link is reported as failed.
+        assertEquals(1, result.importedCount)
+        assertTrue(result.errors.single().contains("Nested Variation"))
+        assertTrue(result.errors.single().contains("could not link"))
+        assertTrue(result.errors.single().contains("imported standalone"))
+    }
+
+    @Test
+    fun importFromUri_templateRoundTrip_reimportingTheExactSameFileSkipsEveryRowAsDuplicate() = runTest {
+        val templateCsv = ExerciseCsvTemplate.render()
+        every { exerciseRepository.getAllExercises() } returns
+            flowOf(listOf(Exercise(id = 1L, name = "Push-Up"), Exercise(id = 2L, name = "Farmer's Walk"), Exercise(id = 3L, name = "Diamond Push-Up")))
+        stubCsvContent(templateCsv)
+
+        val result = importer.importFromUri(uri)
+
+        assertEquals(0, result.importedCount)
+        assertEquals(3, result.skippedCount)
+        coVerify(exactly = 0) { exerciseRepository.createExerciseWithRelations(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { exerciseRepository.linkVariationResult(any(), any(), any()) }
     }
 }

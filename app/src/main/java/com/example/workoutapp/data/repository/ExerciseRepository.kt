@@ -1,7 +1,10 @@
 package com.example.workoutapp.data.repository
 
 import com.example.workoutapp.data.local.dao.ExerciseDao
+import com.example.workoutapp.data.local.dao.ExerciseFamilyMutation
+import com.example.workoutapp.data.local.dao.ExerciseSaveOutcome
 import com.example.workoutapp.data.model.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -157,38 +160,119 @@ class ExerciseRepository @Inject constructor(
     // Exercise family / variations
     //
     // Variations are full, independent Exercise rows; `exercise_variations` only records the
-    // family relationship (see ExerciseVariationCrossRef). These invariants are enforced here
-    // rather than purely in SQL so callers get a clear, user-displayable error message:
-    //   - no self-link
-    //   - no duplicate parentage (a variation can't be re-linked without detaching first)
-    //   - no multi-level nesting (a main exercise can't also be a variation of something else,
-    //     and a variation can't also have its own variations)
+    // family relationship (see ExerciseVariationCrossRef). Invariant checks (no self-link, no
+    // duplicate parentage, no multi-level nesting) and the mutation itself are centralized in
+    // ExerciseDao's @Transaction helpers so validation and mutation are atomic - no window where
+    // one caller's check passes and a concurrent caller's insert races it, and no window where an
+    // exercise/relations save partially commits while a rejected family change leaves it
+    // inconsistent.
+
+    /**
+     * Atomically creates or updates [exercise] together with its relations AND its exercise
+     * family mutation in one DB transaction (see [ExerciseDao.insertWithRelationsAndFamily] /
+     * [ExerciseDao.updateWithRelationsAndFamily]). [existingExerciseId] is null to create a new
+     * exercise, or the id of the exercise being edited. Any validation failure (self-link,
+     * missing/invalid parent, invalid nesting) or unexpected persistence exception leaves the
+     * database completely unchanged - the exercise row, its relations, and its family link (or
+     * lack thereof) all stay exactly as they were before the call, so callers can safely treat
+     * "not Success" as "nothing was persisted" when deciding whether to clean up newly-copied
+     * media. [CancellationException] is always rethrown so cancellation semantics are preserved.
+     */
+    suspend fun saveExerciseWithFamily(
+        existingExerciseId: Long?,
+        exercise: Exercise,
+        categories: List<WorkoutCategory>,
+        equipmentIds: List<Long>,
+        primaryMuscles: List<MuscleGroup>,
+        secondaryMuscles: List<MuscleGroup> = emptyList(),
+        familyMutation: ExerciseFamilyMutation = ExerciseFamilyMutation.NoChange
+    ): ExerciseSaveResult {
+        return try {
+            val outcome = if (existingExerciseId == null) {
+                exerciseDao.insertWithRelationsAndFamily(
+                    exercise = exercise,
+                    categories = categories,
+                    equipmentIds = equipmentIds,
+                    primaryMuscles = primaryMuscles,
+                    secondaryMuscles = secondaryMuscles,
+                    familyMutation = familyMutation
+                )
+            } else {
+                exerciseDao.updateWithRelationsAndFamily(
+                    exercise = exercise.copy(id = existingExerciseId),
+                    categories = categories,
+                    equipmentIds = equipmentIds,
+                    primaryMuscles = primaryMuscles,
+                    secondaryMuscles = secondaryMuscles,
+                    familyMutation = familyMutation
+                )
+            }
+            outcome.toSaveResult()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ExerciseSaveResult.Failure(ExerciseSaveError.PersistFailed)
+        }
+    }
+
+    private fun ExerciseSaveOutcome.toSaveResult(): ExerciseSaveResult = when (this) {
+        is ExerciseSaveOutcome.Success -> ExerciseSaveResult.Success(exerciseId)
+        ExerciseSaveOutcome.ExerciseNotFound -> ExerciseSaveResult.Failure(ExerciseSaveError.ExerciseNotFound)
+        ExerciseSaveOutcome.SelfLink -> ExerciseSaveResult.Failure(ExerciseSaveError.SelfLink)
+        is ExerciseSaveOutcome.ParentNotFound -> ExerciseSaveResult.Failure(ExerciseSaveError.ParentNotFound)
+        is ExerciseSaveOutcome.ParentIsAlreadyVariation ->
+            ExerciseSaveResult.Failure(ExerciseSaveError.ParentIsAlreadyVariation(parentName))
+        is ExerciseSaveOutcome.ExerciseHasOwnVariations ->
+            ExerciseSaveResult.Failure(ExerciseSaveError.ExerciseHasOwnVariations(exerciseName))
+        ExerciseSaveOutcome.AlreadyLinkedElsewhere ->
+            ExerciseSaveResult.Failure(ExerciseSaveError.PersistFailed)
+    }
+
+    /**
+     * Atomically validates and links [variationExerciseId] as a variation of
+     * [parentExerciseId] (see [ExerciseDao.linkVariation]), for standalone linking outside of an
+     * exercise-editor save (e.g. CSV import). Requires the variation be explicitly detached
+     * first if it is already linked elsewhere. [CancellationException] is always rethrown.
+     */
+    suspend fun linkVariationResult(parentExerciseId: Long, variationExerciseId: Long, focus: String): ExerciseFamilyLinkResult {
+        return try {
+            when (val outcome = exerciseDao.linkVariation(parentExerciseId, variationExerciseId, focus.trim())) {
+                is ExerciseSaveOutcome.Success -> ExerciseFamilyLinkResult.Success
+                ExerciseSaveOutcome.ExerciseNotFound ->
+                    ExerciseFamilyLinkResult.Failure(ExerciseFamilyLinkError.VariationNotFound)
+                ExerciseSaveOutcome.SelfLink ->
+                    ExerciseFamilyLinkResult.Failure(ExerciseFamilyLinkError.SelfLink)
+                is ExerciseSaveOutcome.ParentNotFound ->
+                    ExerciseFamilyLinkResult.Failure(ExerciseFamilyLinkError.ParentNotFound)
+                is ExerciseSaveOutcome.ParentIsAlreadyVariation ->
+                    ExerciseFamilyLinkResult.Failure(ExerciseFamilyLinkError.ParentIsAlreadyVariation(outcome.parentName))
+                is ExerciseSaveOutcome.ExerciseHasOwnVariations ->
+                    ExerciseFamilyLinkResult.Failure(ExerciseFamilyLinkError.ExerciseHasOwnVariations(outcome.exerciseName))
+                ExerciseSaveOutcome.AlreadyLinkedElsewhere ->
+                    ExerciseFamilyLinkResult.Failure(ExerciseFamilyLinkError.AlreadyLinkedElsewhere)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            ExerciseFamilyLinkResult.Failure(ExerciseFamilyLinkError.PersistFailed)
+        }
+    }
+
+    /**
+     * Throwing convenience wrapper over [linkVariationResult] for existing callers/tests written
+     * against the original exception-based contract.
+     */
     suspend fun linkVariation(parentExerciseId: Long, variationExerciseId: Long, focus: String) {
-        require(parentExerciseId != variationExerciseId) {
-            "An exercise cannot be a variation of itself."
+        when (val result = linkVariationResult(parentExerciseId, variationExerciseId, focus)) {
+            is ExerciseFamilyLinkResult.Success -> Unit
+            is ExerciseFamilyLinkResult.Failure -> when (result.error) {
+                is ExerciseFamilyLinkError.VariationNotFound, is ExerciseFamilyLinkError.ParentNotFound ->
+                    throw IllegalArgumentException(result.error.message)
+                is ExerciseFamilyLinkError.SelfLink ->
+                    throw IllegalArgumentException(result.error.message)
+                else -> throw IllegalStateException(result.error.message)
+            }
         }
-        val parent = exerciseDao.getById(parentExerciseId)
-            ?: throw IllegalArgumentException("The selected main exercise no longer exists.")
-        val variation = exerciseDao.getById(variationExerciseId)
-            ?: throw IllegalArgumentException("The selected variation exercise no longer exists.")
-
-        check(exerciseDao.countLinksAsVariation(parentExerciseId) == 0) {
-            "\"${parent.name}\" is already a variation of another exercise, so it can't also be a main exercise."
-        }
-        check(exerciseDao.countVariationsForParent(variationExerciseId) == 0) {
-            "\"${variation.name}\" already has its own variations, so it can't also be a variation."
-        }
-        check(exerciseDao.getVariationLink(variationExerciseId) == null) {
-            "\"${variation.name}\" is already a variation of another exercise. Detach it first."
-        }
-
-        exerciseDao.insertVariationLink(
-            ExerciseVariationCrossRef(
-                variationExerciseId = variationExerciseId,
-                parentExerciseId = parentExerciseId,
-                focus = focus.trim()
-            )
-        )
     }
 
     suspend fun unlinkVariation(variationExerciseId: Long) {
@@ -225,6 +309,15 @@ class ExerciseRepository @Inject constructor(
         exerciseDao.getAllVariationLinks().associate { it.variationExerciseId to it.parentExerciseId }
 
     /**
+     * Builds a `exerciseId -> name` map for every exercise, including archived ones, in one
+     * query - used to resolve a variation's parent name for display even when the parent itself
+     * has been filtered out of the currently visible result set (e.g. archived, or excluded by a
+     * search/category filter).
+     */
+    suspend fun getAllExerciseNamesById(): Map<Long, String> =
+        exerciseDao.getAllSync().associate { it.id to it.name }
+
+    /**
      * Returns the full family (main exercise + all variations) that [exerciseId] belongs to, or
      * null if [exerciseId] is a standalone exercise with no family relationship at all.
      */
@@ -242,19 +335,3 @@ class ExerciseRepository @Inject constructor(
     fun getFamilyFlow(exerciseId: Long): Flow<List<ExerciseVariationCrossRef>> =
         exerciseDao.getVariationLinksForParentFlow(exerciseId)
 }
-
-/**
- * A main exercise together with all of its linked variations. [variations] always includes
- * [root] itself when [root] happens to be a variation exercise being viewed from its own
- * perspective (see [ExerciseRepository.getFamily]), so callers should filter it out by id when
- * rendering "other variations" lists.
- */
-data class ExerciseFamily(
-    val root: Exercise,
-    val variations: List<ExerciseVariationMember>
-)
-
-data class ExerciseVariationMember(
-    val exercise: Exercise,
-    val focus: String
-)

@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.workoutapp.data.local.MediaStorageException
 import com.example.workoutapp.data.local.MediaStorageManager
+import com.example.workoutapp.data.local.dao.ExerciseFamilyMutation
 import com.example.workoutapp.data.model.Difficulty
 import com.example.workoutapp.data.model.Equipment
 import com.example.workoutapp.data.model.Exercise
@@ -19,6 +20,8 @@ import com.example.workoutapp.data.model.persistedJson
 import com.example.workoutapp.data.repository.EquipmentRepository
 import com.example.workoutapp.data.repository.EquipmentSaveResult
 import com.example.workoutapp.data.repository.ExerciseRepository
+import com.example.workoutapp.data.repository.ExerciseSaveError
+import com.example.workoutapp.data.repository.ExerciseSaveResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -162,6 +165,53 @@ class AddEditExerciseViewModel @Inject constructor(
                     selectedParentId = originalParentId,
                     familyFocus = originalFocus,
                     existingVariations = existingVariations,
+                    familyError = null,
+                    isLoading = false
+                )
+            }
+        }
+    }
+
+    /**
+     * Pre-fills a brand-new exercise as a variation of [parentExerciseId]: copies shared,
+     * non-identity fields (categories, primary/secondary muscles, equipment, difficulty) from the
+     * main exercise so the form starts sensibly, but leaves name/description/instructions/
+     * tips/personal notes/media blank and never copies tracking history - this is still a fully
+     * independent exercise the user names and edits before saving, not a clone. [selectedParentId]
+     * is pre-set so the family link is created atomically when the user saves (see
+     * [AddEditExerciseViewModel.saveExercise]).
+     */
+    fun loadNewVariation(parentExerciseId: Long) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            loadFamilyPickerCandidates()
+
+            val parent = exerciseRepository.getExerciseById(parentExerciseId)
+            if (parent == null) {
+                _uiState.update {
+                    it.copy(isLoading = false, familyError = "The selected main exercise no longer exists.")
+                }
+                return@launch
+            }
+            val categories = exerciseRepository.getExerciseCategories(parentExerciseId)
+            val equipmentIds = exerciseRepository.getRequiredEquipmentIds(parentExerciseId)
+            val primaryMuscles = exerciseRepository.getPrimaryMuscles(parentExerciseId)
+            val secondaryMuscles = exerciseRepository.getSecondaryMuscles(parentExerciseId)
+            val selectedEquipment = equipmentIds.mapNotNull { id -> equipmentRepository.getEquipmentById(id) }
+
+            _uiState.update { state ->
+                state.copy(
+                    difficulty = parent.difficulty,
+                    selectedCategories = categories.toSet(),
+                    selectedEquipment = selectedEquipment,
+                    primaryMuscles = primaryMuscles,
+                    secondaryMuscles = secondaryMuscles,
+                    isCompound = parent.isCompound,
+                    isUnilateral = parent.isUnilateral,
+                    originalParentId = null,
+                    selectedParentId = parentExerciseId,
+                    familyFocus = "",
+                    existingVariations = emptyList(),
                     familyError = null,
                     isLoading = false
                 )
@@ -474,7 +524,7 @@ class AddEditExerciseViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isSaving = true, saveError = null) }
+            _uiState.update { it.copy(isSaving = true, saveError = null, familyError = null) }
 
             var copiedMediaUris: List<Uri> = emptyList()
             try {
@@ -511,7 +561,21 @@ class AddEditExerciseViewModel @Inject constructor(
                 }
                 val balancedPreset = state.trainingPhasePresets.getValue(TrainingPhase.BALANCED)
 
+                val exerciseId = editingExerciseId
+                val existing = exerciseId?.let { exerciseRepository.getExerciseById(it) }
+                if (exerciseId != null && existing == null) {
+                    mediaStorageManager.deleteOwnedMediaFiles(copiedMediaUris)
+                    _uiState.update {
+                        it.copy(
+                            isSaving = false,
+                            saveError = "Exercise no longer exists. Your changes were not saved."
+                        )
+                    }
+                    return@launch
+                }
+
                 val editableExercise = Exercise(
+                    id = existing?.id ?: 0L,
                     name = state.name.trim(),
                     description = state.description.trim(),
                     instructions = state.instructions.trim(),
@@ -526,66 +590,67 @@ class AddEditExerciseViewModel @Inject constructor(
                     localMediaUris = localMediaJson,
                     externalMediaUrls = externalMediaJson,
                     personalNotes = state.personalNotes.trim(),
+                    // Preserve everything the form doesn't edit (tracking metadata, timestamps)
+                    // when updating; use model defaults when creating.
+                    timesPerformed = existing?.timesPerformed ?: 0,
+                    lastPerformedAt = existing?.lastPerformedAt,
+                    isFavorite = existing?.isFavorite ?: false,
+                    isArchived = existing?.isArchived ?: false,
+                    estimatedDurationSeconds = existing?.estimatedDurationSeconds ?: 180,
+                    createdAt = existing?.createdAt ?: System.currentTimeMillis(),
                     updatedAt = System.currentTimeMillis()
                 )
 
-                val exerciseId = editingExerciseId
-                val savedExerciseId: Long
-                if (exerciseId != null) {
-                    val existing = exerciseRepository.getExerciseById(exerciseId)
-                    if (existing == null) {
-                        _uiState.update {
-                            it.copy(
-                                isSaving = false,
-                                saveError = "Exercise no longer exists. Your changes were not saved."
+                // "Change main exercise"/"detach" is a single atomic replace inside the DAO
+                // transaction below, so LinkTo covers both first-time linking and reparenting -
+                // no separate unlink-then-relink step that could leave the exercise silently
+                // detached if the second step failed.
+                val familyMutation = when {
+                    state.selectedParentId != null -> ExerciseFamilyMutation.LinkTo(state.selectedParentId, state.familyFocus)
+                    state.originalParentId != null -> ExerciseFamilyMutation.Detach
+                    else -> ExerciseFamilyMutation.NoChange
+                }
+
+                val result = exerciseRepository.saveExerciseWithFamily(
+                    existingExerciseId = existing?.id,
+                    exercise = editableExercise,
+                    categories = state.selectedCategories.toList(),
+                    equipmentIds = state.selectedEquipment.map { it.id },
+                    primaryMuscles = state.primaryMuscles,
+                    secondaryMuscles = state.secondaryMuscles,
+                    familyMutation = familyMutation
+                )
+
+                when (result) {
+                    is ExerciseSaveResult.Success -> {
+                        // Only now, after the transaction has definitely committed the exercise
+                        // row referencing copiedMediaUris, is it safe to clean up media that was
+                        // removed from the form - it can never be a currently-referenced file.
+                        if (state.removedLocalMediaUris.isNotEmpty()) {
+                            mediaStorageManager.deleteUnreferencedMedia(
+                                candidateUris = state.removedLocalMediaUris,
+                                allExercises = exerciseRepository.getAllExercisesIncludingArchivedSync()
                             )
                         }
-                        return@launch
+                        _uiState.update { it.copy(isSaving = false, saveSuccess = true) }
                     }
-                    exerciseRepository.updateExerciseWithRelations(
-                        exercise = existing.copy(
-                            name = editableExercise.name,
-                            description = editableExercise.description,
-                            instructions = editableExercise.instructions,
-                            tips = editableExercise.tips,
-                            difficulty = editableExercise.difficulty,
-                            isUnilateral = editableExercise.isUnilateral,
-                            isCompound = editableExercise.isCompound,
-                            defaultSets = editableExercise.defaultSets,
-                            defaultReps = editableExercise.defaultReps,
-                            defaultRestSeconds = editableExercise.defaultRestSeconds,
-                            trainingPhasePresets = editableExercise.trainingPhasePresets,
-                            localMediaUris = editableExercise.localMediaUris,
-                            externalMediaUrls = editableExercise.externalMediaUrls,
-                            personalNotes = editableExercise.personalNotes,
-                            updatedAt = editableExercise.updatedAt
-                        ),
-                        categories = state.selectedCategories.toList(),
-                        equipmentIds = state.selectedEquipment.map { it.id },
-                        primaryMuscles = state.primaryMuscles,
-                        secondaryMuscles = state.secondaryMuscles
-                    )
-                    savedExerciseId = exerciseId
-                } else {
-                    savedExerciseId = exerciseRepository.createExerciseWithRelations(
-                        exercise = editableExercise,
-                        categories = state.selectedCategories.toList(),
-                        equipmentIds = state.selectedEquipment.map { it.id },
-                        primaryMuscles = state.primaryMuscles,
-                        secondaryMuscles = state.secondaryMuscles
-                    )
+                    is ExerciseSaveResult.Failure -> {
+                        // Nothing was persisted (the whole transaction rolled back), so any
+                        // newly-copied media is definitely unreferenced and safe to delete.
+                        mediaStorageManager.deleteOwnedMediaFiles(copiedMediaUris)
+                        val isFamilyError = result.error is ExerciseSaveError.SelfLink ||
+                            result.error is ExerciseSaveError.ParentNotFound ||
+                            result.error is ExerciseSaveError.ParentIsAlreadyVariation ||
+                            result.error is ExerciseSaveError.ExerciseHasOwnVariations
+                        _uiState.update {
+                            if (isFamilyError) {
+                                it.copy(isSaving = false, familyError = result.error.message)
+                            } else {
+                                it.copy(isSaving = false, saveError = result.error.message)
+                            }
+                        }
+                    }
                 }
-
-                applyFamilyChanges(savedExerciseId, state)
-
-                if (state.removedLocalMediaUris.isNotEmpty()) {
-                    mediaStorageManager.deleteUnreferencedMedia(
-                        candidateUris = state.removedLocalMediaUris,
-                        allExercises = exerciseRepository.getAllExercisesIncludingArchivedSync()
-                    )
-                }
-
-                _uiState.update { it.copy(isSaving = false, saveSuccess = true) }
             } catch (e: MediaStorageException) {
                 mediaStorageManager.deleteOwnedMediaFiles(copiedMediaUris)
                 _uiState.update {
@@ -596,42 +661,6 @@ class AddEditExerciseViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(isSaving = false, saveError = e.message ?: "Saved data could not be decoded")
                 }
-            } catch (e: IllegalStateException) {
-                mediaStorageManager.deleteOwnedMediaFiles(copiedMediaUris)
-                _uiState.update {
-                    it.copy(isSaving = false, saveError = e.message ?: "Failed to save exercise")
-                }
-            } catch (e: IllegalArgumentException) {
-                mediaStorageManager.deleteOwnedMediaFiles(copiedMediaUris)
-                _uiState.update {
-                    it.copy(isSaving = false, saveError = e.message ?: "Failed to save exercise family link")
-                }
-            }
-        }
-    }
-
-    /**
-     * Applies whatever family-relationship change the user made on this save: link to a newly
-     * selected main exercise, detach from the current one, reparent to a different main exercise,
-     * or just update the focus text on an unchanged link. Runs after the exercise row itself is
-     * created/updated so a brand-new exercise's real id is available.
-     */
-    private suspend fun applyFamilyChanges(savedExerciseId: Long, state: AddEditExerciseUiState) {
-        val originalParentId = state.originalParentId
-        val selectedParentId = state.selectedParentId
-        when {
-            selectedParentId == originalParentId && selectedParentId != null -> {
-                exerciseRepository.updateVariationFocus(savedExerciseId, state.familyFocus)
-            }
-            selectedParentId == originalParentId -> Unit // both null: never was, still isn't, a variation
-            selectedParentId == null -> {
-                exerciseRepository.unlinkVariation(savedExerciseId)
-            }
-            else -> {
-                if (originalParentId != null) {
-                    exerciseRepository.unlinkVariation(savedExerciseId)
-                }
-                exerciseRepository.linkVariation(selectedParentId, savedExerciseId, state.familyFocus)
             }
         }
     }

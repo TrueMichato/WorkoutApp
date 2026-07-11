@@ -35,14 +35,19 @@ import com.example.workoutapp.ui.test.TestTags
 fun AddEditExerciseScreen(
     exerciseId: Long?,
     onNavigateBack: () -> Unit,
+    newVariationOfParentId: Long? = null,
     viewModel: AddEditExerciseViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val isEditing = exerciseId != null
 
-    // Load exercise if editing
-    LaunchedEffect(exerciseId) {
-        exerciseId?.let { viewModel.loadExercise(it) }
+    // Load exercise if editing, or pre-fill a brand-new variation of newVariationOfParentId.
+    LaunchedEffect(exerciseId, newVariationOfParentId) {
+        if (exerciseId != null) {
+            viewModel.loadExercise(exerciseId)
+        } else if (newVariationOfParentId != null) {
+            viewModel.loadNewVariation(newVariationOfParentId)
+        }
     }
 
     // Image picker

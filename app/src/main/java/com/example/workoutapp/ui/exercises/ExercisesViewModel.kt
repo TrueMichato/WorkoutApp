@@ -104,13 +104,18 @@ class ExercisesViewModel @Inject constructor(
     private suspend fun buildFamilyBadges(visibleExercises: List<Exercise>): Map<Long, ExerciseFamilyBadge> {
         if (visibleExercises.isEmpty()) return emptyMap()
         val variationParentIds = exerciseRepository.getFamilyRootIdsForAll()
-        val exerciseNamesById = visibleExercises.associateBy { it.id }
+        // Resolve parent/variation names from every exercise (including archived and any
+        // filtered-out by the current search/category), not just the currently visible list -
+        // otherwise a variation whose parent is excluded from the visible set (archived, outside
+        // the active search/category filter, etc.) would show a bare "Variation" badge instead
+        // of "Variation of X".
+        val allExerciseNamesById = exerciseRepository.getAllExerciseNamesById()
         val badges = mutableMapOf<Long, ExerciseFamilyBadge>()
         val variationCountByParent = variationParentIds.values.groupingBy { it }.eachCount()
         visibleExercises.forEach { exercise ->
             val parentId = variationParentIds[exercise.id]
             if (parentId != null) {
-                val parentName = exerciseNamesById[parentId]?.name
+                val parentName = allExerciseNamesById[parentId]
                 badges[exercise.id] = ExerciseFamilyBadge.Variation(parentName = parentName)
             } else {
                 val count = variationCountByParent[exercise.id] ?: 0

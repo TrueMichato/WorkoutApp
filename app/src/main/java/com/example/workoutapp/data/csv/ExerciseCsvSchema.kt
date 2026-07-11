@@ -45,7 +45,15 @@ object ExerciseCsvSchema {
             "One or more of: ${muscleNames()}. Separate multiple values with | or ;."
         ),
         Column("secondary_muscles", "Same syntax as primary_muscles."),
-        Column("personal_notes", "Freeform notes only you will see.")
+        Column("personal_notes", "Freeform notes only you will see."),
+        Column(
+            "main_exercise",
+            "Name of an existing or another imported exercise this row is a variation of " +
+                "(e.g. \"Push-Up\"). Leave blank for a standalone/main exercise. Resolved after " +
+                "every row in this file has been imported, so a variation row can appear before " +
+                "or after its main exercise's row."
+        ),
+        Column("variation_focus", "Short note on what makes this variation different, e.g. \"Triceps emphasis\". Only used when main_exercise is set.")
     )
 
     /** Suffixes appended to a training-phase prefix, e.g. "strength_focus_sets". */

@@ -35,6 +35,7 @@ fun ExerciseDetailScreen(
     onNavigateBack: () -> Unit,
     onNavigateToEdit: () -> Unit,
     onNavigateToExercise: (Long) -> Unit = {},
+    onNavigateToCreateVariation: (Long) -> Unit = {},
     viewModel: ExerciseDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -102,6 +103,20 @@ fun ExerciseDetailScreen(
                                     viewModel.archiveExercise()
                                 },
                                 leadingIcon = { Icon(Icons.Default.Archive, null) }
+                            )
+                        }
+                        // Only offered when this exercise is not itself a variation - a
+                        // variation can't also become a main exercise (see ExerciseRepository
+                        // family invariants), so creating a variation-of-a-variation is blocked
+                        // here rather than surfacing a confusing error after navigating.
+                        if (uiState.parentExercise == null) {
+                            DropdownMenuItem(
+                                text = { Text("Create variation") },
+                                onClick = {
+                                    showMenu = false
+                                    onNavigateToCreateVariation(exerciseId)
+                                },
+                                leadingIcon = { Icon(Icons.Default.Add, null) }
                             )
                         }
                     }
