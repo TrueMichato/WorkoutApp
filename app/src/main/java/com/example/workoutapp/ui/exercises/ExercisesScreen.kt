@@ -229,6 +229,7 @@ fun ExercisesScreen(
                     items(uiState.exercises, key = { it.id }) { exercise ->
                         ExerciseCard(
                             exercise = exercise,
+                            familyBadge = uiState.familyBadges[exercise.id],
                             onClick = { onNavigateToExerciseDetail(exercise.id) },
                             onFavoriteClick = { viewModel.toggleFavorite(exercise) },
                             modifier = Modifier.testTag(TestTags.Exercises.exerciseCard(exercise.id))
@@ -258,6 +259,7 @@ fun ExercisesScreen(
 @Composable
 private fun ExerciseCard(
     exercise: Exercise,
+    familyBadge: ExerciseFamilyBadge? = null,
     onClick: () -> Unit,
     onFavoriteClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -285,6 +287,19 @@ private fun ExerciseCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2
                     )
+                }
+                when (familyBadge) {
+                    is ExerciseFamilyBadge.MainExercise -> Text(
+                        "${familyBadge.variationCount} variation${if (familyBadge.variationCount == 1) "" else "s"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    is ExerciseFamilyBadge.Variation -> Text(
+                        familyBadge.parentName?.let { "Variation of $it" } ?: "Variation",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    null -> Unit
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {

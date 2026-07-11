@@ -244,6 +244,111 @@ class ExerciseProtectionInstrumentedTest {
         assertFalse(exerciseRepository.getAllExercisesIncludingArchived().first().any { it.id == exerciseId })
     }
 
+    @Test
+    fun hardDelete_isGuardedWhileFamilyLinked_untilExplicitlyDetached() = runBlocking {
+        val mainId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Push-up"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        val variationId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Tiger Push-up"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        exerciseRepository.linkVariation(mainId, variationId, "Triceps emphasis")
+
+        // Neither side of the link can be hard-deleted while linked.
+        assertTrue(runCatching { exerciseRepository.hardDeleteExerciseIfUnreferenced(mainId) }.isFailure)
+        assertTrue(runCatching { exerciseRepository.hardDeleteExerciseIfUnreferenced(variationId) }.isFailure)
+        assertNotNull(exerciseRepository.getExerciseById(mainId))
+        assertNotNull(exerciseRepository.getExerciseById(variationId))
+
+        exerciseRepository.unlinkVariation(variationId)
+
+        // Once detached, both are ordinary unreferenced standalone exercises again.
+        exerciseRepository.hardDeleteExerciseIfUnreferenced(variationId)
+        exerciseRepository.hardDeleteExerciseIfUnreferenced(mainId)
+        assertNull(exerciseRepository.getExerciseById(variationId))
+        assertNull(exerciseRepository.getExerciseById(mainId))
+    }
+
+    @Test
+    fun linkVariation_rejectsSelfLinkCycleAndDuplicateParent() = runBlocking {
+        val pushUpId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Push-up"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        val tigerId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Tiger Push-up"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        val pikeId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Pike Push-up"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+
+        // No self-link.
+        assertTrue(runCatching { exerciseRepository.linkVariation(pushUpId, pushUpId, "") }.isFailure)
+
+        exerciseRepository.linkVariation(pushUpId, tigerId, "Triceps emphasis")
+
+        // No multi-level nesting: a variation can't also become a main exercise.
+        assertTrue(runCatching { exerciseRepository.linkVariation(tigerId, pikeId, "") }.isFailure)
+        // No multi-level nesting: a main exercise can't also become a variation.
+        assertTrue(runCatching { exerciseRepository.linkVariation(pikeId, pushUpId, "") }.isFailure)
+        // No duplicate parentage without detaching first.
+        assertTrue(runCatching { exerciseRepository.linkVariation(pikeId, tigerId, "") }.isFailure)
+
+        assertEquals(pushUpId, exerciseRepository.getParentExerciseId(tigerId))
+    }
+
+    @Test
+    fun getFamily_resolvesRootAndListsAllVariationsWithFocus() = runBlocking {
+        val pushUpId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Push-up"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        val tigerId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Tiger Push-up"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        val pikeId = exerciseRepository.createExerciseWithRelations(
+            exercise = Exercise(name = "Pike Push-up"),
+            categories = listOf(WorkoutCategory.STRENGTH),
+            equipmentIds = emptyList(),
+            primaryMuscles = emptyList()
+        )
+        exerciseRepository.linkVariation(pushUpId, tigerId, "Triceps emphasis")
+        exerciseRepository.linkVariation(pushUpId, pikeId, "Shoulder emphasis")
+
+        val familyFromRoot = exerciseRepository.getFamily(pushUpId)
+        assertNotNull(familyFromRoot)
+        requireNotNull(familyFromRoot)
+        assertEquals(pushUpId, familyFromRoot.root.id)
+        assertEquals(2, familyFromRoot.variations.size)
+        assertEquals("Triceps emphasis", familyFromRoot.variations.single { it.exercise.id == tigerId }.focus)
+
+        val familyFromVariation = exerciseRepository.getFamily(tigerId)
+        assertNotNull(familyFromVariation)
+        requireNotNull(familyFromVariation)
+        assertEquals(pushUpId, familyFromVariation.root.id)
+
+        assertNull(exerciseRepository.getFamily(pikeId + 1_000_000L))
+    }
+
     private suspend fun waitUntil(predicate: () -> Boolean) {
         withTimeout(5_000) {
             while (!predicate()) {

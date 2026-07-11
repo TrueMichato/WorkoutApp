@@ -56,7 +56,8 @@ object WorkoutDatabaseSeeder {
             seedLocationEquipment(db, equipmentIds)
             seedUserGoal(db, now)
             seedCategoryStats(db, now)
-            seedSampleExercises(db, equipmentIds, now)
+            val exerciseIds = seedSampleExercises(db, equipmentIds, now)
+            seedExerciseVariations(db, exerciseIds)
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -139,7 +140,7 @@ object WorkoutDatabaseSeeder {
         db: SupportSQLiteDatabase,
         equipmentIds: Map<String, Long>,
         now: Long
-    ) {
+    ): Map<String, Long> {
         SampleExercises.all.forEachIndexed { index, sample ->
             val exerciseId = index + 1L
             val exercise = Exercise(
@@ -170,6 +171,30 @@ object WorkoutDatabaseSeeder {
             sample.secondaryMuscles.forEach { muscleGroup ->
                 db.insertExerciseMuscle(exerciseId, muscleGroup.name, isPrimary = false)
             }
+        }
+        return SampleExercises.all.mapIndexed { index, sample -> sample.name to index + 1L }.toMap()
+    }
+
+    /**
+     * Links the seeded Push-up variations (Tiger/Pike/Plyometric/Slow) to the seeded Push-up main
+     * exercise, only on brand-new installs (this runs inside the same onCreate seeding
+     * transaction as [seedSampleExercises], never on an upgrade/migration). Uses
+     * [SupportSQLiteDatabase.insert] with CONFLICT_IGNORE against the `exercise_variations`
+     * primary key (`variationExerciseId`), so re-running this against an already-seeded database
+     * is a no-op rather than a duplicate/crash.
+     */
+    private fun seedExerciseVariations(db: SupportSQLiteDatabase, exerciseIds: Map<String, Long>) {
+        val mainId = exerciseIds[SampleExercises.PUSH_UP_MAIN_NAME] ?: return
+        SampleExercises.PUSH_UP_VARIATIONS.forEach { (variationName, focus) ->
+            val variationId = exerciseIds[variationName] ?: return@forEach
+            db.insertIgnore(
+                "exercise_variations",
+                valuesOf {
+                    put("variationExerciseId", variationId)
+                    put("parentExerciseId", mainId)
+                    put("focus", focus)
+                }
+            )
         }
     }
 

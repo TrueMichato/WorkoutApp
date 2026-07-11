@@ -153,4 +153,108 @@ class ExerciseRepository @Inject constructor(
             secondaryMuscles = secondaryMuscles
         )
     }
+
+    // Exercise family / variations
+    //
+    // Variations are full, independent Exercise rows; `exercise_variations` only records the
+    // family relationship (see ExerciseVariationCrossRef). These invariants are enforced here
+    // rather than purely in SQL so callers get a clear, user-displayable error message:
+    //   - no self-link
+    //   - no duplicate parentage (a variation can't be re-linked without detaching first)
+    //   - no multi-level nesting (a main exercise can't also be a variation of something else,
+    //     and a variation can't also have its own variations)
+    suspend fun linkVariation(parentExerciseId: Long, variationExerciseId: Long, focus: String) {
+        require(parentExerciseId != variationExerciseId) {
+            "An exercise cannot be a variation of itself."
+        }
+        val parent = exerciseDao.getById(parentExerciseId)
+            ?: throw IllegalArgumentException("The selected main exercise no longer exists.")
+        val variation = exerciseDao.getById(variationExerciseId)
+            ?: throw IllegalArgumentException("The selected variation exercise no longer exists.")
+
+        check(exerciseDao.countLinksAsVariation(parentExerciseId) == 0) {
+            "\"${parent.name}\" is already a variation of another exercise, so it can't also be a main exercise."
+        }
+        check(exerciseDao.countVariationsForParent(variationExerciseId) == 0) {
+            "\"${variation.name}\" already has its own variations, so it can't also be a variation."
+        }
+        check(exerciseDao.getVariationLink(variationExerciseId) == null) {
+            "\"${variation.name}\" is already a variation of another exercise. Detach it first."
+        }
+
+        exerciseDao.insertVariationLink(
+            ExerciseVariationCrossRef(
+                variationExerciseId = variationExerciseId,
+                parentExerciseId = parentExerciseId,
+                focus = focus.trim()
+            )
+        )
+    }
+
+    suspend fun unlinkVariation(variationExerciseId: Long) {
+        exerciseDao.deleteVariationLink(variationExerciseId)
+    }
+
+    suspend fun updateVariationFocus(variationExerciseId: Long, focus: String) {
+        check(exerciseDao.updateVariationFocus(variationExerciseId, focus.trim()) == 1) {
+            "This exercise is no longer linked as a variation."
+        }
+    }
+
+    suspend fun isMainExercise(exerciseId: Long): Boolean = exerciseDao.countVariationsForParent(exerciseId) > 0
+
+    suspend fun isVariationExercise(exerciseId: Long): Boolean = exerciseDao.getVariationLink(exerciseId) != null
+
+    suspend fun getParentExerciseId(variationExerciseId: Long): Long? =
+        exerciseDao.getVariationLink(variationExerciseId)?.parentExerciseId
+
+    /**
+     * Resolves any exercise to the id of its family's main/root exercise - itself, if it is
+     * standalone or already the main exercise.
+     */
+    suspend fun resolveFamilyRootId(exerciseId: Long): Long =
+        exerciseDao.getVariationLink(exerciseId)?.parentExerciseId ?: exerciseId
+
+    /**
+     * Builds a `variationExerciseId -> parentExerciseId` map for every linked variation in one
+     * query, so the workout generator can resolve each candidate's family root cheaply without
+     * a lookup per exercise. Exercises absent from this map are standalone (their family root is
+     * themselves).
+     */
+    suspend fun getFamilyRootIdsForAll(): Map<Long, Long> =
+        exerciseDao.getAllVariationLinks().associate { it.variationExerciseId to it.parentExerciseId }
+
+    /**
+     * Returns the full family (main exercise + all variations) that [exerciseId] belongs to, or
+     * null if [exerciseId] is a standalone exercise with no family relationship at all.
+     */
+    suspend fun getFamily(exerciseId: Long): ExerciseFamily? {
+        val rootId = resolveFamilyRootId(exerciseId)
+        val root = exerciseDao.getById(rootId) ?: return null
+        val links = exerciseDao.getVariationLinksForParent(rootId)
+        if (links.isEmpty()) return null
+        val variations = links.mapNotNull { link ->
+            exerciseDao.getById(link.variationExerciseId)?.let { ExerciseVariationMember(it, link.focus) }
+        }
+        return ExerciseFamily(root = root, variations = variations)
+    }
+
+    fun getFamilyFlow(exerciseId: Long): Flow<List<ExerciseVariationCrossRef>> =
+        exerciseDao.getVariationLinksForParentFlow(exerciseId)
 }
+
+/**
+ * A main exercise together with all of its linked variations. [variations] always includes
+ * [root] itself when [root] happens to be a variation exercise being viewed from its own
+ * perspective (see [ExerciseRepository.getFamily]), so callers should filter it out by id when
+ * rendering "other variations" lists.
+ */
+data class ExerciseFamily(
+    val root: Exercise,
+    val variations: List<ExerciseVariationMember>
+)
+
+data class ExerciseVariationMember(
+    val exercise: Exercise,
+    val focus: String
+)

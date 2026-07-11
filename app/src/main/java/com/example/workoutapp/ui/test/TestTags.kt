@@ -46,12 +46,19 @@ object TestTags {
         const val TipsField = "add_edit_exercise_tips"
         const val SaveButton = "add_edit_exercise_save"
         const val PersonalNotesField = "add_edit_exercise_personal_notes"
+        const val FamilyParentPickerButton = "add_edit_exercise_family_parent_picker"
+        const val FamilyFocusField = "add_edit_exercise_family_focus"
+        const val FamilyDetachButton = "add_edit_exercise_family_detach"
+        const val FamilyClearParentButton = "add_edit_exercise_family_clear_parent"
 
         fun categoryChip(category: WorkoutCategory): String =
             "add_edit_exercise_category_${category.name.lowercase()}"
 
         fun presetPhaseChip(phase: TrainingPhase): String =
             "add_edit_exercise_preset_phase_${phase.name.lowercase()}"
+
+        fun familyParentOption(exerciseId: Long): String =
+            "add_edit_exercise_family_parent_option_$exerciseId"
     }
 
     object Workout {
@@ -72,6 +79,7 @@ object TestTags {
         const val ErrorDismissButton = "workout_generator_error_dismiss_button"
         const val EditSetupButton = "workout_generator_edit_setup_button"
         const val PreviewCard = "workout_generator_preview_card"
+        const val FamilyDedupToggle = "workout_generator_family_dedup_toggle"
     }
 
     object WorkoutPlanEditor {

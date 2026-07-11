@@ -95,6 +95,7 @@ fun AddEditExerciseScreen(
         var showEquipmentDialog by remember { mutableStateOf(false) }
         var showMuscleDialog by remember { mutableStateOf(false) }
         var showUrlDialog by remember { mutableStateOf(false) }
+        var showFamilyParentDialog by remember { mutableStateOf(false) }
 
         Column(
             modifier = Modifier
@@ -571,6 +572,77 @@ fun AddEditExerciseScreen(
 
             HorizontalDivider()
 
+            // Exercise Family Section
+            val selectedParent = uiState.familyParentCandidates.firstOrNull { it.id == uiState.selectedParentId }
+            Text(
+                "Exercise Family",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (uiState.existingVariations.isNotEmpty()) {
+                Text(
+                    "This is a main exercise with ${uiState.existingVariations.size} variation(s):",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                uiState.existingVariations.forEach { variation ->
+                    AssistChip(onClick = {}, label = { Text(variation.name) })
+                }
+            } else if (selectedParent != null) {
+                Text(
+                    "Variation of \"${selectedParent.name}\"",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                OutlinedTextField(
+                    value = uiState.familyFocus,
+                    onValueChange = viewModel::onFamilyFocusChanged,
+                    label = { Text("Focus (what makes this variation different)") },
+                    placeholder = { Text("e.g. Triceps emphasis") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(TestTags.AddEditExercise.FamilyFocusField),
+                    singleLine = true
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { showFamilyParentDialog = true },
+                        modifier = Modifier.testTag(TestTags.AddEditExercise.FamilyParentPickerButton)
+                    ) {
+                        Text("Change main exercise")
+                    }
+                    TextButton(
+                        onClick = viewModel::detachFromFamily,
+                        modifier = Modifier.testTag(TestTags.AddEditExercise.FamilyDetachButton)
+                    ) {
+                        Text("Detach")
+                    }
+                }
+            } else {
+                Text(
+                    "Optionally link this exercise as a variation of an existing main exercise (e.g. Push-up).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedButton(
+                    onClick = { showFamilyParentDialog = true },
+                    modifier = Modifier.testTag(TestTags.AddEditExercise.FamilyParentPickerButton)
+                ) {
+                    Icon(Icons.Default.Add, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Make this a variation of…")
+                }
+            }
+            if (uiState.familyError != null) {
+                Text(
+                    uiState.familyError.orEmpty(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+
+            HorizontalDivider()
+
             // Media Section
             Text(
                 "Media",
@@ -694,6 +766,19 @@ fun AddEditExerciseScreen(
                 onPrimaryToggle = viewModel::togglePrimaryMuscle,
                 onSecondaryToggle = viewModel::toggleSecondaryMuscle,
                 onDismiss = { showMuscleDialog = false }
+            )
+        }
+
+        // Exercise family / main-exercise picker dialog
+        if (showFamilyParentDialog) {
+            FamilyParentSelectionDialog(
+                candidates = uiState.familyParentCandidates,
+                selectedParentId = uiState.selectedParentId,
+                onSelect = { parentId ->
+                    viewModel.onFamilyParentSelected(parentId)
+                    showFamilyParentDialog = false
+                },
+                onDismiss = { showFamilyParentDialog = false }
             )
         }
 
@@ -880,6 +965,74 @@ private fun EquipmentSelectionDialog(
         confirmButton = {
             TextButton(onClick = onDismiss) {
                 Text("Done")
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FamilyParentSelectionDialog(
+    candidates: List<Exercise>,
+    selectedParentId: Long?,
+    onSelect: (Long?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = candidates.filter { it.name.contains(query, ignoreCase = true) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Make this a variation of…") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = { Text("Search exercises") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (filtered.isEmpty()) {
+                    Text(
+                        "No matching exercises.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                filtered.forEach { candidate ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(candidate.id) }
+                            .testTag(TestTags.AddEditExercise.familyParentOption(candidate.id))
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = candidate.id == selectedParentId,
+                            onClick = { onSelect(candidate.id) }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(candidate.name)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSelect(null) },
+                modifier = Modifier.testTag(TestTags.AddEditExercise.FamilyClearParentButton)
+            ) {
+                Text("Clear selection")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
             }
         }
     )

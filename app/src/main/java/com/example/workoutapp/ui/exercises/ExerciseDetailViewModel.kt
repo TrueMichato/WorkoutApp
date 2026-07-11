@@ -16,6 +16,7 @@ import com.example.workoutapp.data.model.WorkoutCategory
 import com.example.workoutapp.data.model.decodeTrainingPhasePresets
 import com.example.workoutapp.data.repository.EquipmentRepository
 import com.example.workoutapp.data.repository.ExerciseRepository
+import com.example.workoutapp.data.repository.ExerciseVariationMember
 import com.example.workoutapp.data.repository.UserGoalRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -77,6 +78,20 @@ class ExerciseDetailViewModel @Inject constructor(
 
                     val presets = mergePresetsWithDefaults(exercise, decodeIssues)
 
+                    val parentExercise = exerciseRepository.getParentExerciseId(exerciseId)
+                        ?.let { exerciseRepository.getExerciseById(it) }
+                    val variationFocus = if (parentExercise != null) {
+                        exerciseRepository.getFamily(exerciseId)
+                            ?.variations?.firstOrNull { it.exercise.id == exerciseId }?.focus.orEmpty()
+                    } else {
+                        ""
+                    }
+                    val variations = if (parentExercise == null) {
+                        exerciseRepository.getFamily(exerciseId)?.variations ?: emptyList()
+                    } else {
+                        emptyList()
+                    }
+
                     _uiState.update { state ->
                         state.copy(
                             exercise = exercise,
@@ -88,6 +103,9 @@ class ExerciseDetailViewModel @Inject constructor(
                             externalUrls = externalUrlResult.value,
                             programmingPresets = presets,
                             dataWarnings = decodeIssues.map { it.message },
+                            parentExercise = parentExercise,
+                            variationFocus = variationFocus,
+                            variations = variations,
                             isLoading = false
                         )
                     }
@@ -171,5 +189,12 @@ data class ExerciseDetailUiState(
     val currentPhase: TrainingPhase = TrainingPhase.BALANCED,
     val isLoading: Boolean = true,
     val archiveCompleted: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    // Exercise family / variations: this exercise's main exercise, if it is a variation of one,
+    // and its own focus note within that family.
+    val parentExercise: Exercise? = null,
+    val variationFocus: String = "",
+    // Variations linked to this exercise, populated only when this exercise is itself a main
+    // exercise (parentExercise == null).
+    val variations: List<ExerciseVariationMember> = emptyList()
 )

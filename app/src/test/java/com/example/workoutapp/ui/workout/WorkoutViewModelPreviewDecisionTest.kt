@@ -158,6 +158,7 @@ class WorkoutViewModelPreviewDecisionTest {
                 userGoalRepository = userGoalRepository,
                 mlFeedbackRepository = feedbackRepository,
                 workoutPlanner = planner,
+                userPreferencesDataStore = userPreferencesDataStore,
                 savedStateHandle = SavedStateHandle()
             ),
             feedbackDao = feedbackDao
@@ -290,6 +291,15 @@ private class FakeExerciseDao : ExerciseDao {
     override suspend fun clearCustomCategoriesForExercise(exerciseId: Long) = Unit
     override fun getActiveCount(): Flow<Int> = flowOf(exercises.value.size)
     override suspend fun getFavoriteCount(): Int = 0
+    override suspend fun insertVariationLink(link: com.example.workoutapp.data.model.ExerciseVariationCrossRef) = Unit
+    override suspend fun deleteVariationLink(variationExerciseId: Long): Int = 0
+    override suspend fun updateVariationFocus(variationExerciseId: Long, focus: String): Int = 0
+    override suspend fun getVariationLink(variationExerciseId: Long): com.example.workoutapp.data.model.ExerciseVariationCrossRef? = null
+    override suspend fun getVariationLinksForParent(parentExerciseId: Long): List<com.example.workoutapp.data.model.ExerciseVariationCrossRef> = emptyList()
+    override fun getVariationLinksForParentFlow(parentExerciseId: Long): Flow<List<com.example.workoutapp.data.model.ExerciseVariationCrossRef>> = flowOf(emptyList())
+    override suspend fun countVariationsForParent(exerciseId: Long): Int = 0
+    override suspend fun countLinksAsVariation(exerciseId: Long): Int = 0
+    override suspend fun getAllVariationLinks(): List<com.example.workoutapp.data.model.ExerciseVariationCrossRef> = emptyList()
 }
 
 private class FakeEquipmentDao : EquipmentDao {

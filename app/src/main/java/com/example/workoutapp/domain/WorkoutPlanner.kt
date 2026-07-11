@@ -38,7 +38,10 @@ data class WorkoutGenerationParams(
     val timeSlot: TimeSlot = TimeSlot.ANYTIME,
     val selectedCategories: List<WorkoutCategory> = emptyList(),
     val sessionName: String? = null,
-    val excludedExerciseIds: Set<Long> = emptySet()
+    val excludedExerciseIds: Set<Long> = emptySet(),
+    // Product decision: family de-dup is a persisted, user-controlled toggle (default ON), not
+    // an unconditional rule. See UserPreferencesDataStore.generatorFamilyDedupEnabled.
+    val enforceFamilyDedup: Boolean = true
 )
 
 data class WorkoutCompletionInput(
@@ -81,7 +84,11 @@ data class WorkoutPlanDraft(
 data class WorkoutPlannerCandidate(
     val exercise: Exercise,
     val categories: List<WorkoutCategory>,
-    val requiredEquipmentIds: Set<Long>
+    val requiredEquipmentIds: Set<Long>,
+    // Defaults to the exercise's own id when it is standalone or the main/root exercise of its
+    // family; equals the main exercise's id for every one of its variations. See
+    // ExerciseRepository.getFamilyRootIdsForAll / resolveFamilyRootId.
+    val familyRootId: Long = exercise.id
 )
 
 @Singleton
@@ -170,9 +177,12 @@ class WorkoutPlanner @Inject constructor(
             ?.let { equipmentRepository.getEquipmentIdsForLocation(it).toSet() }
             ?: emptySet()
 
+        val familyRootIds = exerciseRepository.getFamilyRootIdsForAll()
         val allExercises = exerciseRepository.getAllExercises().first()
         val candidates = allExercises.mapNotNull { exercise ->
-            if (exercise.id in params.excludedExerciseIds) return@mapNotNull null
+            // Exclusion (including family-wide exclusion when enforceFamilyDedup is on) is
+            // applied uniformly in WorkoutPlannerEngine.buildDraft, so every exercise still
+            // becomes a candidate here with its familyRootId attached.
             val categories = exerciseRepository.getExerciseCategories(exercise.id)
                 .filter { it != WorkoutCategory.CUSTOM }
             if (categories.isEmpty()) return@mapNotNull null
@@ -189,7 +199,8 @@ class WorkoutPlanner @Inject constructor(
             WorkoutPlannerCandidate(
                 exercise = exercise,
                 categories = categories,
-                requiredEquipmentIds = requiredEquipmentIds
+                requiredEquipmentIds = requiredEquipmentIds,
+                familyRootId = familyRootIds[exercise.id] ?: exercise.id
             )
         }
 
@@ -259,6 +270,17 @@ object WorkoutPlannerEngine {
     ): WorkoutPlanDraft {
         require(candidates.isNotEmpty()) { "Cannot build a workout without candidates." }
 
+        // Family root lookup built from every candidate passed in (including ones that will be
+        // excluded below) so an excluded variation's siblings can still be identified correctly.
+        val familyRootIdByExerciseId = candidates.associate { it.exercise.id to it.familyRootId }
+        val excludedFamilyRoots = if (params.enforceFamilyDedup) {
+            params.excludedExerciseIds.mapTo(mutableSetOf()) { excludedId ->
+                familyRootIdByExerciseId[excludedId] ?: excludedId
+            }
+        } else {
+            emptySet()
+        }
+
         val eligibleCandidates = if (params.selectedCategories.isEmpty()) {
             candidates
         } else {
@@ -266,6 +288,7 @@ object WorkoutPlannerEngine {
                 candidate.categories.any { it in params.selectedCategories }
             }
         }.filterNot { it.exercise.id in params.excludedExerciseIds }
+            .filterNot { params.enforceFamilyDedup && it.familyRootId in excludedFamilyRoots }
         require(eligibleCandidates.isNotEmpty()) { "Cannot build a workout without candidates." }
 
         val focusCategories = determineFocusCategories(
@@ -345,7 +368,13 @@ object WorkoutPlannerEngine {
             nextCandidate.categories.forEach { category ->
                 categoryUsage[category] = (categoryUsage[category] ?: 0) + 1
             }
-            remaining.remove(nextCandidate)
+            if (params.enforceFamilyDedup) {
+                // Remove every remaining candidate from the same family (not just the one just
+                // picked) so at most one member of a family ends up in the generated workout.
+                remaining.removeAll { it.familyRootId == nextCandidate.familyRootId }
+            } else {
+                remaining.remove(nextCandidate)
+            }
         }
 
         if (picked.isEmpty()) {

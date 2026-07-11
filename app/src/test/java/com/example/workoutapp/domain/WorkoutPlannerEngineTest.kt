@@ -275,7 +275,8 @@ class WorkoutPlannerEngineTest {
         defaultSets: Int = 3,
         timesPerformed: Int,
         lastPerformedAt: Long? = null,
-        trainingPhasePresets: String = "{}"
+        trainingPhasePresets: String = "{}",
+        familyRootId: Long? = null
     ): WorkoutPlannerCandidate {
         return WorkoutPlannerCandidate(
             exercise = com.example.workoutapp.data.model.Exercise(
@@ -289,7 +290,124 @@ class WorkoutPlannerEngineTest {
                 trainingPhasePresets = trainingPhasePresets
             ),
             categories = categories,
-            requiredEquipmentIds = emptySet()
+            requiredEquipmentIds = emptySet(),
+            familyRootId = familyRootId ?: id
         )
+    }
+
+    @Test
+    fun buildDraft_enforceFamilyDedupOn_picksAtMostOneMemberPerFamily() {
+        val params = WorkoutGenerationParams(
+            durationMinutes = 60,
+            selectedCategories = listOf(WorkoutCategory.STRENGTH),
+            enforceFamilyDedup = true
+        )
+        // Push-up (root, id=1) and three variations, all sharing familyRootId=1, plus one
+        // unrelated standalone exercise.
+        val candidates = listOf(
+            candidate(1, "Push-up", listOf(WorkoutCategory.STRENGTH), timesPerformed = 5, familyRootId = 1),
+            candidate(2, "Tiger Push-up", listOf(WorkoutCategory.STRENGTH), timesPerformed = 0, familyRootId = 1),
+            candidate(3, "Pike Push-up", listOf(WorkoutCategory.STRENGTH), timesPerformed = 0, familyRootId = 1),
+            candidate(4, "Plyometric Push-up", listOf(WorkoutCategory.STRENGTH), timesPerformed = 0, familyRootId = 1),
+            candidate(5, "Bench Press", listOf(WorkoutCategory.STRENGTH), timesPerformed = 3, familyRootId = 5)
+        )
+
+        val draft = WorkoutPlannerEngine.buildDraft(
+            params = params,
+            goal = goal,
+            candidates = candidates,
+            categoryPriority = mapOf(WorkoutCategory.STRENGTH to 4f),
+            categoryNeglectDays = mapOf(WorkoutCategory.STRENGTH to 5),
+            now = 1_000_000L
+        )
+
+        val pushUpFamilyIds = setOf(1L, 2L, 3L, 4L)
+        val pickedPushUpFamilyMembers = draft.exerciseSummaries.count { it.exerciseId in pushUpFamilyIds }
+        assertEquals(1, pickedPushUpFamilyMembers)
+    }
+
+    @Test
+    fun buildDraft_enforceFamilyDedupOff_allowsMultipleMembersPerFamily() {
+        val params = WorkoutGenerationParams(
+            durationMinutes = 60,
+            selectedCategories = listOf(WorkoutCategory.STRENGTH),
+            enforceFamilyDedup = false
+        )
+        val candidates = listOf(
+            candidate(1, "Push-up", listOf(WorkoutCategory.STRENGTH), timesPerformed = 5, familyRootId = 1),
+            candidate(2, "Tiger Push-up", listOf(WorkoutCategory.STRENGTH), timesPerformed = 0, familyRootId = 1),
+            candidate(3, "Pike Push-up", listOf(WorkoutCategory.STRENGTH), timesPerformed = 0, familyRootId = 1),
+            candidate(4, "Plyometric Push-up", listOf(WorkoutCategory.STRENGTH), timesPerformed = 0, familyRootId = 1)
+        )
+
+        val draft = WorkoutPlannerEngine.buildDraft(
+            params = params,
+            goal = goal,
+            candidates = candidates,
+            categoryPriority = mapOf(WorkoutCategory.STRENGTH to 4f),
+            categoryNeglectDays = mapOf(WorkoutCategory.STRENGTH to 5),
+            now = 1_000_000L
+        )
+
+        val pushUpFamilyIds = setOf(1L, 2L, 3L, 4L)
+        val pickedPushUpFamilyMembers = draft.exerciseSummaries.count { it.exerciseId in pushUpFamilyIds }
+        assertTrue(pickedPushUpFamilyMembers > 1)
+    }
+
+    @Test
+    fun buildDraft_enforceFamilyDedupOn_swapExcludesWholeFamilyOnRegenerate() {
+        // Simulates "swap out Push-up" -> regenerate: Push-up's excluded, and with dedup on its
+        // siblings must not fill the freed slot either.
+        val params = WorkoutGenerationParams(
+            durationMinutes = 30,
+            selectedCategories = listOf(WorkoutCategory.STRENGTH),
+            excludedExerciseIds = setOf(1L),
+            enforceFamilyDedup = true
+        )
+        val candidates = listOf(
+            candidate(1, "Push-up", listOf(WorkoutCategory.STRENGTH), timesPerformed = 5, familyRootId = 1),
+            candidate(2, "Tiger Push-up", listOf(WorkoutCategory.STRENGTH), timesPerformed = 0, familyRootId = 1),
+            candidate(3, "Pike Push-up", listOf(WorkoutCategory.STRENGTH), timesPerformed = 0, familyRootId = 1),
+            candidate(4, "Bench Press", listOf(WorkoutCategory.STRENGTH), timesPerformed = 3, familyRootId = 4)
+        )
+
+        val draft = WorkoutPlannerEngine.buildDraft(
+            params = params,
+            goal = goal,
+            candidates = candidates,
+            categoryPriority = mapOf(WorkoutCategory.STRENGTH to 4f),
+            categoryNeglectDays = mapOf(WorkoutCategory.STRENGTH to 5),
+            now = 1_000_000L
+        )
+
+        assertTrue(draft.exerciseSummaries.none { it.exerciseId in setOf(1L, 2L, 3L) })
+    }
+
+    @Test
+    fun buildDraft_enforceFamilyDedupOff_swapOnlyExcludesTheSpecificExercise() {
+        // With the toggle off, swapping out Push-up should still let its siblings compete for the
+        // freed slot on regenerate.
+        val params = WorkoutGenerationParams(
+            durationMinutes = 30,
+            selectedCategories = listOf(WorkoutCategory.STRENGTH),
+            excludedExerciseIds = setOf(1L),
+            enforceFamilyDedup = false
+        )
+        val candidates = listOf(
+            candidate(1, "Push-up", listOf(WorkoutCategory.STRENGTH), timesPerformed = 5, familyRootId = 1),
+            candidate(2, "Tiger Push-up", listOf(WorkoutCategory.STRENGTH), timesPerformed = 0, familyRootId = 1)
+        )
+
+        val draft = WorkoutPlannerEngine.buildDraft(
+            params = params,
+            goal = goal,
+            candidates = candidates,
+            categoryPriority = mapOf(WorkoutCategory.STRENGTH to 4f),
+            categoryNeglectDays = mapOf(WorkoutCategory.STRENGTH to 5),
+            now = 1_000_000L
+        )
+
+        assertTrue(draft.exerciseSummaries.none { it.exerciseId == 1L })
+        assertTrue(draft.exerciseSummaries.any { it.exerciseId == 2L })
     }
 }

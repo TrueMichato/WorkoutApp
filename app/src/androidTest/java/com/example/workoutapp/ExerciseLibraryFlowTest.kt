@@ -2,6 +2,7 @@ package com.example.workoutapp
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -107,5 +108,54 @@ class ExerciseLibraryFlowTest {
             composeRule.onAllNodesWithText(exerciseName).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText(exerciseName).assertIsDisplayed()
+    }
+
+    @Test
+    fun createVariationFlow_linksToMainExerciseAndNavigatesBothWays() {
+        val mainName = "UI Test Main Push-up ${System.currentTimeMillis()}"
+        val variationName = "UI Test Tiger Push-up ${System.currentTimeMillis()}"
+        val mainExerciseId = runBlocking {
+            exerciseRepository.createExerciseWithRelations(
+                exercise = Exercise(name = mainName),
+                categories = emptyList(),
+                equipmentIds = emptyList(),
+                primaryMuscles = emptyList()
+            )
+        }
+
+        composeRule.onNodeWithTag(TestTags.BottomNav.Exercises).performClick()
+        composeRule.onNodeWithTag(TestTags.Exercises.Screen).assertIsDisplayed()
+        composeRule.onNodeWithTag(TestTags.Exercises.AddFab).performClick()
+
+        composeRule.onNodeWithTag(TestTags.AddEditExercise.Screen).assertIsDisplayed()
+        composeRule.onNodeWithTag(TestTags.AddEditExercise.NameField).performTextInput(variationName)
+        composeRule.onNodeWithTag(TestTags.AddEditExercise.FamilyParentPickerButton).performClick()
+
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithTag(TestTags.AddEditExercise.familyParentOption(mainExerciseId))
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag(TestTags.AddEditExercise.familyParentOption(mainExerciseId)).performClick()
+        composeRule.onNodeWithTag(TestTags.AddEditExercise.FamilyFocusField).performTextInput("Triceps emphasis")
+        composeRule.onNodeWithTag(TestTags.AddEditExercise.SaveButton).performClick()
+
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText(variationName).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // Library shows the "Variation of" badge on the new exercise's card.
+        composeRule.onNodeWithText("Variation of $mainName").assertIsDisplayed()
+
+        // Detail screen for the variation links back to the main exercise.
+        composeRule.onNodeWithText(variationName).performClick()
+        composeRule.onNodeWithText("Variation of \"$mainName\"").assertIsDisplayed()
+        composeRule.onNodeWithText("Triceps emphasis").assertIsDisplayed()
+        composeRule.onNodeWithText("Variation of \"$mainName\"").performClick()
+
+        // Now on the main exercise's detail screen, showing its variation.
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText("Variations").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText(variationName).assertIsDisplayed()
     }
 }

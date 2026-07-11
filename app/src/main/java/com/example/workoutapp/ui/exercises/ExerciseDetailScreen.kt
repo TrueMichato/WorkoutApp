@@ -34,6 +34,7 @@ fun ExerciseDetailScreen(
     exerciseId: Long,
     onNavigateBack: () -> Unit,
     onNavigateToEdit: () -> Unit,
+    onNavigateToExercise: (Long) -> Unit = {},
     viewModel: ExerciseDetailViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -250,6 +251,61 @@ fun ExerciseDetailScreen(
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+
+                    // Exercise family: this exercise's main exercise (if it's a variation), or
+                    // its own variations (if it is the main exercise).
+                    val parentExercise = uiState.parentExercise
+                    if (parentExercise != null) {
+                        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onNavigateToExercise(parentExercise.id) }
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    "Variation of \"${parentExercise.name}\"",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                if (uiState.variationFocus.isNotBlank()) {
+                                    Text(
+                                        uiState.variationFocus,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    } else if (uiState.variations.isNotEmpty()) {
+                        SectionHeader("Variations")
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            uiState.variations.forEach { variation ->
+                                ElevatedCard(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onNavigateToExercise(variation.exercise.id) }
+                                ) {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(variation.exercise.name, style = MaterialTheme.typography.titleSmall)
+                                        if (variation.focus.isNotBlank()) {
+                                            Text(
+                                                variation.focus,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     // Categories

@@ -115,6 +115,9 @@ fun WorkoutNavHost(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToEdit = {
                     navController.navigate(Screen.EditExercise.createRoute(exerciseId))
+                },
+                onNavigateToExercise = { targetExerciseId ->
+                    navController.navigate(Screen.ExerciseDetail.createRoute(targetExerciseId))
                 }
             )
         }

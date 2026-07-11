@@ -1,6 +1,8 @@
 package com.example.workoutapp.data.model
 
 import androidx.room.Entity
+import androidx.room.ForeignKey
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import kotlinx.serialization.Serializable
 
@@ -121,6 +123,43 @@ data class ExerciseMuscleCrossRef(
     val exerciseId: Long,
     val muscleGroup: MuscleGroup,
     val isPrimary: Boolean = true // Primary vs secondary/stabilizer
+)
+
+/**
+ * Links a variation exercise (e.g. "Tiger Push-up") to its main/root exercise
+ * (e.g. "Push-up"). Both sides are full, independent [Exercise] rows with their own
+ * categories, muscles, equipment, media, favorites, and history - this table only
+ * records the family relationship and a short explanation of what makes the
+ * variation different.
+ *
+ * [variationExerciseId] is the primary key so a variation can belong to at most one
+ * parent. Repository-level validation (see `ExerciseRepository.linkVariation`) additionally
+ * rejects self-links, cycles, and multi-level nesting (a parent can't also be a variation,
+ * and a variation can't also be a parent) - the schema alone does not express those rules.
+ */
+@Entity(
+    tableName = "exercise_variations",
+    primaryKeys = ["variationExerciseId"],
+    foreignKeys = [
+        ForeignKey(
+            entity = Exercise::class,
+            parentColumns = ["id"],
+            childColumns = ["variationExerciseId"],
+            onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = Exercise::class,
+            parentColumns = ["id"],
+            childColumns = ["parentExerciseId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [Index("parentExerciseId")]
+)
+data class ExerciseVariationCrossRef(
+    val variationExerciseId: Long,
+    val parentExerciseId: Long,
+    val focus: String = ""
 )
 
 /**

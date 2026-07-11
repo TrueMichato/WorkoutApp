@@ -41,6 +41,7 @@ class AddEditExerciseViewModel @Inject constructor(
 
     init {
         loadEquipment()
+        loadFamilyPickerCandidates()
     }
 
     private fun loadEquipment() {
@@ -51,9 +52,31 @@ class AddEditExerciseViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Loads the pool of exercises that could become this exercise's main exercise: active,
+     * not itself, and not already a variation of something else (a variation can't also be a
+     * main exercise - see ExerciseRepository.linkVariation). Exercises that already have their
+     * own variations remain valid candidates, since one main exercise can have many variations.
+     */
+    private fun loadFamilyPickerCandidates() {
+        viewModelScope.launch {
+            exerciseRepository.getAllExercises().collect { exercises ->
+                val variationIds = exerciseRepository.getFamilyRootIdsForAll().keys
+                _uiState.update { state ->
+                    state.copy(
+                        familyParentCandidates = exercises.filter { candidate ->
+                            candidate.id != editingExerciseId && candidate.id !in variationIds
+                        }
+                    )
+                }
+            }
+        }
+    }
+
     fun loadExercise(exerciseId: Long) {
         viewModelScope.launch {
             editingExerciseId = exerciseId
+            loadFamilyPickerCandidates()
 
             val exercise = exerciseRepository.getExerciseById(exerciseId)
             if (exercise == null) {
@@ -66,6 +89,18 @@ class AddEditExerciseViewModel @Inject constructor(
             val equipmentIds = exerciseRepository.getRequiredEquipmentIds(exerciseId)
             val primaryMuscles = exerciseRepository.getPrimaryMuscles(exerciseId)
             val secondaryMuscles = exerciseRepository.getSecondaryMuscles(exerciseId)
+
+            val existingFamily = exerciseRepository.getFamily(exerciseId)
+            val originalParentId = exerciseRepository.getParentExerciseId(exerciseId)
+            val originalFocus = existingFamily?.variations
+                ?.firstOrNull { it.exercise.id == exerciseId }?.focus.orEmpty()
+            // Only exercises that are the family's main/root exercise (not the one being edited)
+            // count as "existing variations" for the read-only list below.
+            val existingVariations = if (originalParentId == null) {
+                existingFamily?.variations?.map { it.exercise } ?: emptyList()
+            } else {
+                emptyList()
+            }
 
             val selectedEquipment = equipmentIds.mapNotNull { id ->
                 equipmentRepository.getEquipmentById(id)
@@ -121,6 +156,11 @@ class AddEditExerciseViewModel @Inject constructor(
                     originalExternalMediaJson = exercise.externalMediaUrls,
                     originalTrainingPhasePresetsJson = exercise.trainingPhasePresets,
                     dataWarnings = decodeIssues.map { it.message },
+                    originalParentId = originalParentId,
+                    selectedParentId = originalParentId,
+                    familyFocus = originalFocus,
+                    existingVariations = existingVariations,
+                    familyError = null,
                     isLoading = false
                 )
             }
@@ -358,6 +398,33 @@ class AddEditExerciseViewModel @Inject constructor(
         _uiState.update { it.copy(personalNotes = notes, saveError = null) }
     }
 
+    /**
+     * Selects (or clears, when [parentId] is null) which main exercise this exercise is a
+     * variation of. Blocked when this exercise already has its own variations (a main exercise
+     * can't also become a variation - no multi-level nesting), surfaced via [familyError] the
+     * same way [nameError] surfaces a blank-name problem.
+     */
+    fun onFamilyParentSelected(parentId: Long?) {
+        _uiState.update { state ->
+            if (parentId != null && state.existingVariations.isNotEmpty()) {
+                state.copy(
+                    familyError = "This exercise already has its own variations, so it can't also be a variation of another exercise."
+                )
+            } else {
+                state.copy(selectedParentId = parentId, familyError = null)
+            }
+        }
+    }
+
+    fun onFamilyFocusChanged(focus: String) {
+        _uiState.update { it.copy(familyFocus = focus, familyError = null) }
+    }
+
+    /** Detaches this exercise from its main exercise, leaving it standalone. Save-time only. */
+    fun detachFromFamily() {
+        _uiState.update { it.copy(selectedParentId = null, familyFocus = "", familyError = null) }
+    }
+
     fun saveExercise() {
         val state = _uiState.value
 
@@ -365,6 +432,12 @@ class AddEditExerciseViewModel @Inject constructor(
 
         if (state.name.isBlank()) {
             _uiState.update { it.copy(nameError = "Name is required") }
+            return
+        }
+        if (state.selectedParentId != null && state.existingVariations.isNotEmpty()) {
+            _uiState.update {
+                it.copy(familyError = "This exercise already has its own variations, so it can't also be a variation of another exercise.")
+            }
             return
         }
 
@@ -425,6 +498,7 @@ class AddEditExerciseViewModel @Inject constructor(
                 )
 
                 val exerciseId = editingExerciseId
+                val savedExerciseId: Long
                 if (exerciseId != null) {
                     val existing = exerciseRepository.getExerciseById(exerciseId)
                     if (existing == null) {
@@ -459,8 +533,9 @@ class AddEditExerciseViewModel @Inject constructor(
                         primaryMuscles = state.primaryMuscles,
                         secondaryMuscles = state.secondaryMuscles
                     )
+                    savedExerciseId = exerciseId
                 } else {
-                    exerciseRepository.createExerciseWithRelations(
+                    savedExerciseId = exerciseRepository.createExerciseWithRelations(
                         exercise = editableExercise,
                         categories = state.selectedCategories.toList(),
                         equipmentIds = state.selectedEquipment.map { it.id },
@@ -468,6 +543,8 @@ class AddEditExerciseViewModel @Inject constructor(
                         secondaryMuscles = state.secondaryMuscles
                     )
                 }
+
+                applyFamilyChanges(savedExerciseId, state)
 
                 if (state.removedLocalMediaUris.isNotEmpty()) {
                     mediaStorageManager.deleteUnreferencedMedia(
@@ -492,6 +569,37 @@ class AddEditExerciseViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(isSaving = false, saveError = e.message ?: "Failed to save exercise")
                 }
+            } catch (e: IllegalArgumentException) {
+                mediaStorageManager.deleteOwnedMediaFiles(copiedMediaUris)
+                _uiState.update {
+                    it.copy(isSaving = false, saveError = e.message ?: "Failed to save exercise family link")
+                }
+            }
+        }
+    }
+
+    /**
+     * Applies whatever family-relationship change the user made on this save: link to a newly
+     * selected main exercise, detach from the current one, reparent to a different main exercise,
+     * or just update the focus text on an unchanged link. Runs after the exercise row itself is
+     * created/updated so a brand-new exercise's real id is available.
+     */
+    private suspend fun applyFamilyChanges(savedExerciseId: Long, state: AddEditExerciseUiState) {
+        val originalParentId = state.originalParentId
+        val selectedParentId = state.selectedParentId
+        when {
+            selectedParentId == originalParentId && selectedParentId != null -> {
+                exerciseRepository.updateVariationFocus(savedExerciseId, state.familyFocus)
+            }
+            selectedParentId == originalParentId -> Unit // both null: never was, still isn't, a variation
+            selectedParentId == null -> {
+                exerciseRepository.unlinkVariation(savedExerciseId)
+            }
+            else -> {
+                if (originalParentId != null) {
+                    exerciseRepository.unlinkVariation(savedExerciseId)
+                }
+                exerciseRepository.linkVariation(selectedParentId, savedExerciseId, state.familyFocus)
             }
         }
     }
@@ -592,5 +700,12 @@ data class AddEditExerciseUiState(
     val mediaDirty: Boolean = false,
     val externalUrlsDirty: Boolean = false,
     val presetsDirty: Boolean = false,
-    val removedLocalMediaUris: List<Uri> = emptyList()
+    val removedLocalMediaUris: List<Uri> = emptyList(),
+    // Exercise family / variations
+    val familyParentCandidates: List<Exercise> = emptyList(),
+    val originalParentId: Long? = null,
+    val selectedParentId: Long? = null,
+    val familyFocus: String = "",
+    val existingVariations: List<Exercise> = emptyList(),
+    val familyError: String? = null
 )

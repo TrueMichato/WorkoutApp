@@ -98,12 +98,48 @@ interface ExerciseDao {
         check(referenceCount == 0) {
             "Cannot permanently delete an exercise used by workout history, saved plans, PT routines, or feedback."
         }
+        check(countVariationsForParent(exerciseId) == 0) {
+            "Cannot permanently delete an exercise that still has variations linked to it. Detach its variations first."
+        }
+        check(countLinksAsVariation(exerciseId) == 0) {
+            "Cannot permanently delete an exercise that is still linked as a variation. Detach it from its main exercise first."
+        }
         clearCategoriesForExercise(exerciseId)
         clearEquipmentForExercise(exerciseId)
         clearMusclesForExercise(exerciseId)
         clearCustomCategoriesForExercise(exerciseId)
         check(deleteById(exerciseId) == 1) { "Exercise $exerciseId no longer exists." }
     }
+
+    // Exercise family / variation links
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertVariationLink(link: ExerciseVariationCrossRef)
+
+    @Query("DELETE FROM exercise_variations WHERE variationExerciseId = :variationExerciseId")
+    suspend fun deleteVariationLink(variationExerciseId: Long): Int
+
+    @Query("UPDATE exercise_variations SET focus = :focus WHERE variationExerciseId = :variationExerciseId")
+    suspend fun updateVariationFocus(variationExerciseId: Long, focus: String): Int
+
+    @Query("SELECT * FROM exercise_variations WHERE variationExerciseId = :variationExerciseId")
+    suspend fun getVariationLink(variationExerciseId: Long): ExerciseVariationCrossRef?
+
+    @Query("SELECT * FROM exercise_variations WHERE parentExerciseId = :parentExerciseId ORDER BY variationExerciseId ASC")
+    suspend fun getVariationLinksForParent(parentExerciseId: Long): List<ExerciseVariationCrossRef>
+
+    @Query("SELECT * FROM exercise_variations WHERE parentExerciseId = :parentExerciseId ORDER BY variationExerciseId ASC")
+    fun getVariationLinksForParentFlow(parentExerciseId: Long): Flow<List<ExerciseVariationCrossRef>>
+
+    @Query("SELECT COUNT(*) FROM exercise_variations WHERE parentExerciseId = :exerciseId")
+    suspend fun countVariationsForParent(exerciseId: Long): Int
+
+    @Query("SELECT COUNT(*) FROM exercise_variations WHERE variationExerciseId = :exerciseId")
+    suspend fun countLinksAsVariation(exerciseId: Long): Int
+
+    // All links at once - used by the workout generator to resolve every exercise's family root
+    // in a single query instead of one lookup per candidate.
+    @Query("SELECT * FROM exercise_variations")
+    suspend fun getAllVariationLinks(): List<ExerciseVariationCrossRef>
 
     // Category cross-references
     @Insert(onConflict = OnConflictStrategy.REPLACE)
