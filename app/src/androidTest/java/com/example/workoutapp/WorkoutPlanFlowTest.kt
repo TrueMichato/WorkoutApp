@@ -121,16 +121,19 @@ class WorkoutPlanFlowTest {
 
         // The rich prescription summary (rounds/tempo/effort) can render below the fold in the
         // active workout's scrollable content list, so scroll each target into view before
-        // asserting it rather than assuming it's already on screen.
-        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
+        // asserting it rather than assuming it's already on screen. useUnmergedTree = true
+        // because the ContentList tag lives on a node whose own semantics get merged into an
+        // ancestor in the default merged tree (Compose warns exactly this when the merged-tree
+        // lookup finds zero matches but the unmerged tree has exactly one).
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList, useUnmergedTree = true)
             .performScrollToNode(hasText("3 rounds", substring = true))
         composeRule.onNodeWithText("3 rounds", substring = true).assertIsDisplayed()
 
-        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList, useUnmergedTree = true)
             .performScrollToNode(hasText("Tempo 31X1", substring = true))
         composeRule.onNodeWithText("Tempo 31X1", substring = true).assertIsDisplayed()
 
-        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList)
+        composeRule.onNodeWithTag(TestTags.ActiveWorkout.ContentList, useUnmergedTree = true)
             .performScrollToNode(hasText("RPE 8", substring = true))
         composeRule.onNodeWithText("RPE 8", substring = true).assertIsDisplayed()
     }
