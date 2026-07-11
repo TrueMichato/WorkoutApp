@@ -148,6 +148,11 @@ class WorkoutGeneratorSetupFlowTest {
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ContentList)
             .performScrollToNode(hasTestTag(TestTags.WorkoutGenerator.ResetDefaultsButton))
         composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ResetDefaultsButton).assertIsDisplayed()
+        // "Clear" lives in the Categories section, above the family-dedup toggle and action
+        // buttons - scroll back to it explicitly rather than assuming it's still in the
+        // viewport after scrolling down to ResetDefaultsButton.
+        composeRule.onNodeWithTag(TestTags.WorkoutGenerator.ContentList)
+            .performScrollToNode(hasText("Clear"))
         composeRule.onNodeWithText("Clear").assertIsDisplayed()
     }
 

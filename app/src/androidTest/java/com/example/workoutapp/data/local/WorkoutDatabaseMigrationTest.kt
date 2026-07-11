@@ -139,7 +139,10 @@ class WorkoutDatabaseMigrationTest {
             database.openHelper.writableDatabase
             fail("Opening an unsupported pre-v5 database should require an explicit migration.")
         } catch (expected: IllegalStateException) {
-            assertTrue(expected.message.orEmpty().contains("A migration from 4 to 5 was required"))
+            assertTrue(
+                expected.message.orEmpty()
+                    .contains("A migration from 4 to ${WorkoutDatabaseMigrations.CURRENT_VERSION} was required")
+            )
         } finally {
             database.close()
         }

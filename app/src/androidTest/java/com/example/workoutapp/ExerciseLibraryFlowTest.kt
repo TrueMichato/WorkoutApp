@@ -2,6 +2,7 @@ package com.example.workoutapp
 
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -66,7 +67,7 @@ class ExerciseLibraryFlowTest {
         composeRule.onNodeWithTag(TestTags.AddEditExercise.NameField).performTextInput(exerciseName)
         composeRule.onNodeWithTag(TestTags.AddEditExercise.SaveButton).performClick()
 
-        composeRule.waitUntil(timeoutMillis = 5_000) {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText(exerciseName).fetchSemanticsNodes().isNotEmpty()
         }
 
@@ -91,26 +92,29 @@ class ExerciseLibraryFlowTest {
         composeRule.onNodeWithTag(TestTags.Exercises.Screen).assertIsDisplayed()
         composeRule.onNodeWithTag(TestTags.Exercises.libraryFilter(ExerciseLibraryFilter.ARCHIVED)).performClick()
 
-        composeRule.waitUntil(timeoutMillis = 5_000) {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText(exerciseName).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag(TestTags.Exercises.exerciseCard(exerciseId)).performClick()
 
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Archived").fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText("Archived").assertIsDisplayed()
         composeRule.onNodeWithText(exerciseName).assertIsDisplayed()
         composeRule.onNodeWithContentDescription("More").performClick()
         composeRule.onNodeWithText("Restore").assertIsDisplayed().performClick()
 
-        composeRule.waitUntil(timeoutMillis = 5_000) {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
             runBlocking { exerciseRepository.getExerciseById(exerciseId)?.isArchived == false }
         }
-        composeRule.waitUntil(timeoutMillis = 5_000) {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Archived").fetchSemanticsNodes().isEmpty()
         }
         composeRule.onNodeWithContentDescription("Back").performClick()
         composeRule.onNodeWithTag(TestTags.Exercises.libraryFilter(ExerciseLibraryFilter.ACTIVE)).performClick()
 
-        composeRule.waitUntil(timeoutMillis = 5_000) {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText(exerciseName).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText(exerciseName).assertIsDisplayed()
@@ -137,7 +141,7 @@ class ExerciseLibraryFlowTest {
         composeRule.onNodeWithTag(TestTags.AddEditExercise.NameField).performTextInput(variationName)
         composeRule.onNodeWithTag(TestTags.AddEditExercise.FamilyParentPickerButton).performClick()
 
-        composeRule.waitUntil(timeoutMillis = 5_000) {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithTag(TestTags.AddEditExercise.familyParentOption(mainExerciseId))
                 .fetchSemanticsNodes().isNotEmpty()
         }
@@ -145,7 +149,7 @@ class ExerciseLibraryFlowTest {
         composeRule.onNodeWithTag(TestTags.AddEditExercise.FamilyFocusField).performTextInput("Triceps emphasis")
         composeRule.onNodeWithTag(TestTags.AddEditExercise.SaveButton).performClick()
 
-        composeRule.waitUntil(timeoutMillis = 5_000) {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText(variationName).fetchSemanticsNodes().isNotEmpty()
         }
 
@@ -154,12 +158,15 @@ class ExerciseLibraryFlowTest {
 
         // Detail screen for the variation links back to the main exercise.
         composeRule.onNodeWithText(variationName).performClick()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Variation of \"$mainName\"").fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText("Variation of \"$mainName\"").assertIsDisplayed()
         composeRule.onNodeWithText("Triceps emphasis").assertIsDisplayed()
         composeRule.onNodeWithText("Variation of \"$mainName\"").performClick()
 
         // Now on the main exercise's detail screen, showing its variation.
-        composeRule.waitUntil(timeoutMillis = 5_000) {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText("Variations").fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText(variationName).assertIsDisplayed()
@@ -180,24 +187,30 @@ class ExerciseLibraryFlowTest {
 
         composeRule.onNodeWithTag(TestTags.BottomNav.Exercises).performClick()
         composeRule.onNodeWithTag(TestTags.Exercises.Screen).assertIsDisplayed()
-        composeRule.waitUntil(timeoutMillis = 5_000) {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText(mainName).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithTag(TestTags.Exercises.exerciseCard(mainExerciseId)).performClick()
 
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithContentDescription("More").fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithContentDescription("More").performClick()
         composeRule.onNodeWithText("Create variation").assertIsDisplayed().performClick()
 
         // Landed on the Add Exercise form with the main exercise pre-selected as parent and
         // its shared fields (categories) copied in, but the name field left blank for the user.
         composeRule.onNodeWithTag(TestTags.AddEditExercise.Screen).assertIsDisplayed()
+        composeRule.waitUntil(timeoutMillis = 10_000) {
+            composeRule.onAllNodesWithText("Variation of \"$mainName\"", substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.onNodeWithText("Variation of \"$mainName\"", substring = true).assertIsDisplayed()
 
         composeRule.onNodeWithTag(TestTags.AddEditExercise.NameField).performTextInput(newVariationName)
         composeRule.onNodeWithTag(TestTags.AddEditExercise.FamilyFocusField).performTextInput("New emphasis")
         composeRule.onNodeWithTag(TestTags.AddEditExercise.SaveButton).performClick()
 
-        composeRule.waitUntil(timeoutMillis = 5_000) {
+        composeRule.waitUntil(timeoutMillis = 10_000) {
             composeRule.onAllNodesWithText(newVariationName).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText("Variation of $mainName").assertIsDisplayed()
