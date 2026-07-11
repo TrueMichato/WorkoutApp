@@ -67,9 +67,34 @@ Both jobs use JDK 17 and Gradle caching. Failure reports are uploaded from `app/
 - `WorkoutSessionRepositoryInstrumentedTest`
   - verifies template playback preserves section, notes, and rich prescription JSON
 
+- `ExerciseCsvTemplateDownloadInstrumentedTest`
+  - uses Espresso-Intents to stub `ACTION_CREATE_DOCUMENT`
+  - verifies the "Save CSV template" action in Exercise Library launches it with the
+    `text/csv` MIME type and the expected suggested file name, without driving the real
+    system file picker
+
+## Exercise CSV import/template coverage
+
+`ExerciseCsvSchema` (`app/src/main/java/com/example/workoutapp/data/csv/ExerciseCsvSchema.kt`) is
+the single source of truth for every column `ExerciseCsvImporter` accepts. The in-app help text,
+the generated example file (`ExerciseCsvTemplate`), and importer validation all derive from it, so
+they cannot silently drift apart. Unit tests under
+`app/src/test/java/com/example/workoutapp/data/csv/`:
+
+- `ExerciseCsvSchemaTest` — header uniqueness/completeness, required-header detection, and that
+  `ExerciseCsvTemplate`'s header row matches the schema exactly.
+- `ExerciseCsvTemplateTest` — the generated example parses to exactly the two documented sample
+  rows and round-trips as valid UTF-8.
+- `ExerciseCsvTemplateExporterTest` — the template is written byte-for-byte to the chosen `Uri`,
+  and a failure to open an output stream is surfaced rather than thrown.
+- `ExerciseCsvImporterTest` — missing required headers (`name`/`categories`) are rejected before
+  any equipment or exercise is created; unknown headers are reported as a non-fatal warning; the
+  generated template imports successfully end-to-end under the same schema.
+- `ExerciseCsvParserTest` — quoted/escaped values, multi-value delimiters, and a `writeLine`/
+  `parseLine` round trip for cells containing commas, quotes, and newlines.
+
 ## Recommended next additions
 
 - Add more test tags to `ActiveWorkoutScreen` for set logging and completion flows.
 - Cover generator preview save-as-plan and history views.
-- Add CSV import seams via a fake importer or import abstraction.
 - Add more device coverage if regressions are found on additional supported API levels.

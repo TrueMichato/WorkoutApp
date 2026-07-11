@@ -49,6 +49,39 @@ class ExerciseCsvParserTest {
         assertEquals("Farmer\"s Walk", cells[0])
         assertTrue(cells[2].contains("stay tall"))
     }
+
+    @Test
+    fun writeLine_thenParseLine_roundTripsCellsThatNeedEscaping() {
+        val cells = listOf(
+            "Farmer\"s Walk",
+            "Kettlebell, Sandbag",
+            "Line one\nLine two",
+            "Plain value"
+        )
+
+        val line = ExerciseCsvParser.writeLine(cells)
+        val parsed = ExerciseCsvParser.parseLine(line)
+
+        assertEquals(cells, parsed)
+    }
+
+    @Test
+    fun parseHeaders_normalizesAndReturnsOnlyTheFirstNonBlankLine() {
+        val csv = """
+
+            Name, Categories , Default_Sets
+            Squat,Strength,3
+        """.trimIndent()
+
+        val headers = ExerciseCsvParser.parseHeaders(csv)
+
+        assertEquals(listOf("name", "categories", "default_sets"), headers)
+    }
+
+    @Test
+    fun parseHeaders_returnsEmptyListForBlankInput() {
+        assertTrue(ExerciseCsvParser.parseHeaders("   \n   ").isEmpty())
+    }
 }
 
 

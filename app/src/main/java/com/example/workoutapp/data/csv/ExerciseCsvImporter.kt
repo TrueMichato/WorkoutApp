@@ -35,6 +35,27 @@ class ExerciseCsvImporter @Inject constructor(
                 errors = listOf("Unable to read the selected CSV file.")
             )
 
+        val headers = ExerciseCsvParser.parseHeaders(csvText)
+        if (headers.isEmpty()) {
+            return ExerciseCsvImportResult(
+                importedCount = 0,
+                skippedCount = 1,
+                errors = listOf("The CSV file did not contain any importable rows.")
+            )
+        }
+
+        val missingHeaders = ExerciseCsvSchema.missingRequiredHeaders(headers)
+        if (missingHeaders.isNotEmpty()) {
+            return ExerciseCsvImportResult(
+                importedCount = 0,
+                skippedCount = 0,
+                errors = listOf(
+                    "Missing required column(s): ${missingHeaders.joinToString(", ")}. " +
+                        "No exercises or equipment were created."
+                )
+            )
+        }
+
         val records = ExerciseCsvParser.parse(csvText)
         if (records.isEmpty()) {
             return ExerciseCsvImportResult(
@@ -54,6 +75,11 @@ class ExerciseCsvImporter @Inject constructor(
         var imported = 0
         var skipped = 0
         val errors = mutableListOf<String>()
+
+        val unknownHeaders = ExerciseCsvSchema.unknownHeaders(headers)
+        if (unknownHeaders.isNotEmpty()) {
+            errors += "Unknown column(s) ignored: ${unknownHeaders.joinToString(", ")}."
+        }
 
         records.forEachIndexed { index, record ->
             val rowNumber = index + 2
@@ -148,11 +174,10 @@ class ExerciseCsvImporter @Inject constructor(
     ): Map<TrainingPhase, ExerciseProgrammingPreset> {
         val presets = mutableMapOf<TrainingPhase, ExerciseProgrammingPreset>()
         TrainingPhase.entries.forEach { phase ->
-            val prefix = phase.name.lowercase()
-            val sets = record["${prefix}_sets"]?.takeIf { it.isNotBlank() }
-            val reps = record["${prefix}_reps"]?.takeIf { it.isNotBlank() }
-            val rest = record["${prefix}_rest"]?.toIntOrNull()
-            val notes = record["${prefix}_notes"].orEmpty()
+            val sets = record[ExerciseCsvSchema.phaseHeader(phase, "sets")]?.takeIf { it.isNotBlank() }
+            val reps = record[ExerciseCsvSchema.phaseHeader(phase, "reps")]?.takeIf { it.isNotBlank() }
+            val rest = record[ExerciseCsvSchema.phaseHeader(phase, "rest")]?.toIntOrNull()
+            val notes = record[ExerciseCsvSchema.phaseHeader(phase, "notes")].orEmpty()
             if (sets != null || reps != null || rest != null || notes.isNotBlank()) {
                 presets[phase] = ExerciseProgrammingPreset(
                     setsText = sets ?: if (phase == TrainingPhase.BALANCED) defaultSets.toString() else defaultPresetForPhase(phase).setsText,
@@ -231,6 +256,17 @@ object ExerciseCsvParser {
         }
     }
 
+    /** Extracts and normalizes just the header row, without parsing any data rows. */
+    fun parseHeaders(csvText: String): List<String> {
+        val firstLine = csvText
+            .replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .split('\n')
+            .firstOrNull { it.isNotBlank() }
+            ?: return emptyList()
+        return parseLine(firstLine).map(::normalizeHeader)
+    }
+
     fun parseLine(line: String): List<String> {
         val result = mutableListOf<String>()
         val current = StringBuilder()
@@ -254,6 +290,18 @@ object ExerciseCsvParser {
         }
         result += current.toString()
         return result
+    }
+
+    /** Serializes a row of cells into a single CSV line, quoting/escaping as needed. */
+    fun writeLine(cells: List<String>): String = cells.joinToString(",") { escapeCell(it) }
+
+    private fun escapeCell(cell: String): String {
+        val needsQuoting = cell.any { it == ',' || it == '"' || it == '\n' || it == '\r' }
+        return if (needsQuoting) {
+            "\"${cell.replace("\"", "\"\"")}\""
+        } else {
+            cell
+        }
     }
 }
 

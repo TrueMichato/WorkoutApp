@@ -29,6 +29,7 @@ object TestTags {
         const val SearchField = "exercises_search_field"
         const val AddFab = "exercises_add_fab"
         const val ImportButton = "exercises_import_button"
+        const val SaveTemplateButton = "exercises_save_template_button"
         const val FilterButton = "exercises_filter_button"
 
         fun libraryFilter(filter: ExerciseLibraryFilter): String =
@@ -52,6 +53,16 @@ object TestTags {
 
         fun presetPhaseChip(phase: TrainingPhase): String =
             "add_edit_exercise_preset_phase_${phase.name.lowercase()}"
+    }
+
+    object Equipment {
+        const val Screen = "equipment_management_screen"
+        const val AddButton = "equipment_add_button"
+        const val NameField = "equipment_name_field"
+        const val CreateButton = "equipment_create_button"
+        const val ErrorText = "equipment_error_text"
+
+        fun row(equipmentId: Long): String = "equipment_row_$equipmentId"
     }
 
     object Workout {
